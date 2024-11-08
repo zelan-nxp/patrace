@@ -51,6 +51,7 @@ commands.add('glGraphicBufferData_ARM')
 commands.add('glDeleteGraphicBuffer_ARM')
 commands.add('paMandatoryExtensions')
 commands.add('glAssertBuffer_ARM')
+commands.add('glAssertFramebuffer_ARM')
 commands.add('glStateDump_ARM')
 commands.add('glLinkProgram2')
 commands.add('paTimestamp')
@@ -66,7 +67,6 @@ GLclampx = Alias("GLclampx", Int32)
 
 def GlFunction(*args, **kwargs):
     kwargs.setdefault('call', 'GL_APIENTRY')
-    assert args[1] in commands, 'Function %s does not exist in the Khronos XML!' % args[1]
     return Function(*args, **kwargs)
 
 def InGlString(charType, length, argName):
@@ -240,7 +240,7 @@ gles_functions = [
     GlFunction(Void, "glVertexAttrib2f", [(GLattribLocation, "index"), (GLfloat, "x"), (GLfloat, "y")]),
     GlFunction(Void, "glVertexAttrib3f", [(GLattribLocation, "index"), (GLfloat, "x"), (GLfloat, "y"), (GLfloat, "z")]),
     GlFunction(Void, "glVertexAttrib4f", [(GLattribLocation, "index"), (GLfloat, "x"), (GLfloat, "y"), (GLfloat, "z"), (GLfloat, "w")]),
-    GlFunction(Void, "glVertexAttrib1fv", [(GLattribLocation, "index"), (Pointer(Const(GLfloat)), "v")]),
+    GlFunction(Void, "glVertexAttrib1fv", [(GLattribLocation, "index"), (Array(Const(GLfloat), 1), "v")]),
     GlFunction(Void, "glVertexAttrib2fv", [(GLattribLocation, "index"), (Array(Const(GLfloat), 2), "v")]),
     GlFunction(Void, "glVertexAttrib3fv", [(GLattribLocation, "index"), (Array(Const(GLfloat), 3), "v")]),
     GlFunction(Void, "glVertexAttrib4fv", [(GLattribLocation, "index"), (Array(Const(GLfloat), 4), "v")]),
@@ -452,6 +452,38 @@ gles_functions = [
     # GL_ANGLE_framebuffer_multisample
     GlFunction(Void, "glRenderbufferStorageMultisampleANGLE", [(GLenum, "target"), (GLsizei, "samples"), (GLenum, "internalformat"), (GLsizei, "width"), (GLsizei, "height")]),
 
+    # GL_ANGLE_instanced_arrays
+    GlFunction(Void, "glDrawArraysInstancedANGLE", [(GLenum_mode, "mode"), (GLint, "first"), (GLsizei, "count"), (GLsizei, "instancecount")]),
+    GlFunction(Void, "glDrawElementsInstancedANGLE", [(GLenum_mode, "mode"), (GLsizei, "count"), (GLenum, "type"), (OpaquePointer(Const(Void)), "indices"), (GLsizei, "instancecount")]),
+    GlFunction(Void, "glVertexAttribDivisorANGLE", [(GLuint, "index"), (GLuint, "divisor")]),
+
+    # GL_ANGLE_timer_query
+    GlFunction(Void, "glGenQueriesANGLE", [(GLsizei, "n"), Out(Array(GLquery, "n"), "ids")]),
+    GlFunction(Void, "glDeleteQueriesANGLE", [(GLsizei, "n"), (Array(Const(GLquery), "n"), "ids")]),
+    GlFunction(GLboolean, "glIsQueryANGLE", [(GLquery, "id")], sideeffects=False),
+    GlFunction(Void, "glBeginQueryANGLE", [(GLenum, "target"), (GLquery, "id")]),
+    GlFunction(Void, "glEndQueryANGLE", [(GLenum, "target")]),
+    GlFunction(Void, "glQueryCounterANGLE", [(GLquery, "id"), (GLenum, "target")]),
+    GlFunction(Void, "glGetQueryivANGLE", [(GLenum, "target"), (GLenum, "pname"), Out(Array(GLint, "_gl_param_size(pname)"), "params")], sideeffects=False),
+    GlFunction(Void, "glGetQueryObjectivANGLE", [(GLquery, "id"), (GLenum, "pname"), Out(Array(GLint, "_gl_param_size(pname)"), "params")]),
+    GlFunction(Void, "glGetQueryObjectuivANGLE", [(GLquery, "id"), (GLenum, "pname"), Out(Array(GLuint, "_gl_param_size(pname)"), "params")]),
+    GlFunction(Void, "glGetQueryObjecti64vANGLE", [(GLquery, "id"), (GLenum, "pname"), Out(Array(GLint64, "_gl_param_size(pname)"), "params")]),
+    GlFunction(Void, "glGetQueryObjectui64vANGLE", [(GLquery, "id"), (GLenum, "pname"), Out(Array(GLuint64, "_gl_param_size(pname)"), "params")]),
+
+    # GL_ANGLE_translated_shader_source
+    GlFunction(Void, "glGetTranslatedShaderSourceANGLE", [(GLshader, "shader"), (GLsizei, "bufsize"), Out(Pointer(GLsizei), "length"), OutGlString(GLchar, "length", "source")], sideeffects=False),
+
+    # GL_ANGLE_copy_texture_3d
+    GlFunction(Void, "glCopyTexture3DANGLE", [(GLuint, "sourceId"), (GLint, "sourceLevel"), (GLenum, "destTarget"), (GLuint, "destId"), (GLint, "destLevel"), (GLint, "internalFormat"), (GLenum, "destType"), (GLboolean, "unpackFlipY"), (GLboolean, "unpackPremultiplyAlpha"), (GLboolean, "unpackUnmultiplyAlpha")]),
+    GlFunction(Void, "glCopySubTexture3DANGLE", [(GLuint, "sourceId"), (GLint, "sourceLevel"), (GLenum, "destTarget"), (GLuint, "destId"), (GLint, "destLevel"), (GLint, "xoffset"), (GLint, "yoffset"), (GLint, "zoffset"), (GLint, "x"), (GLint, "y"), (GLint, "z"), (GLsizei, "width"), (GLsizei, "height"), (GLsizei, "depth"), (GLboolean, "unpackFlipY"), (GLboolean, "unpackPremultiplyAlpha"), (GLboolean, "unpackUnmultiplyAlpha")]),
+
+    # GL_CHROMIUM_copy_texture
+    GlFunction(Void, "glCopyTextureCHROMIUM", [(GLuint, "sourceId"), (GLint, "sourceLevel"), (GLenum, "destTarget"), (GLuint, "destId"), (GLint, "destLevel"), (GLint, "internalFormat"), (GLenum, "destType"), (GLboolean, "unpackFlipY"), (GLboolean, "unpackPremultiplyAlpha"), (GLboolean, "unpackUnmultiplyAlpha")]),
+    GlFunction(Void, "glCopySubTextureCHROMIUM", [(GLuint, "sourceId"), (GLint, "sourceLevel"), (GLenum, "destTarget"), (GLuint, "destId"), (GLint, "destLevel"), (GLint, "xoffset"), (GLint, "yoffset"), (GLint, "x"), (GLint, "y"), (GLsizei, "width"), (GLsizei, "height"), (GLboolean, "unpackFlipY"), (GLboolean, "unpackPremultiplyAlpha"), (GLboolean, "unpackUnmultiplyAlpha")]),
+
+    # GL_ANGLE_provoking_vertex
+    GlFunction(Void, "glProvokingVertexANGLE", [(GLenum, "provokeMode")]),
+
     # GL_NV_draw_buffers
     GlFunction(Void, "glDrawBuffersNV", [(GLsizei, "n"), (Array(Const(UInt), "n"), "bufs")]),
 
@@ -547,6 +579,7 @@ gles_functions = [
 
     # Special function used to store MD5 checksum of buffers for integration testing
     GlFunction(Void, "glAssertBuffer_ARM", [(GLenum, "target"), (GLsizei, "offset"), (GLsizei, "size"), (Const(GLstring), "md5")]),
+    GlFunction(Void, "glAssertFramebuffer_ARM", [(GLenum, "target"), (GLint, "colorAttachment"), (Const(GLstring), "md5")]),
 
     # Special function to instruct a state dump at this point
     GlFunction(Void, "glStateDump_ARM", []),

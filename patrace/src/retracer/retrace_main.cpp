@@ -63,7 +63,8 @@ usage(const char *argv0) {
         "  -loadcache FILENAME Load shaders from this cache. Will add .bin and .idx to the given file name.\n"
         "  -savecache FILENAME Save shaders to this cache. Will add .bin and .idx to the given file name.\n"
         "  -cacheonly Used with -savecache to only populate the shader cache and do not run anything else not needed for that from the trace.\n"
-        "  -script Script_PATH FRAME Trigger script on a specific frame.\n"
+        "  -script script_path script_callset. Trigger script on a specific frame. Callset could be like */frame, 30-50/frame, 1/frame, 1,10,20,30-50,60-70/frame.\n"
+        "  -patch PATH Use the given patch file to swap out selected API calls.\n"
 #ifndef __APPLE__
         "  -perfrange START END run Linux perf on selected frame range and save it to disk\n"
         "  -perfpath PATH Set path to perf binary\n"
@@ -82,6 +83,7 @@ usage(const char *argv0) {
         "  -libGLESv1 PATH Set path to libGLESv1_CM.so\n"
         "  -libGLESv2 PATH Set path to libGLESv2.so\n"
         "  -version Output the version of this program\n"
+        "  -intervalswap Set swap interval to 0 for each context to make sure vsync is shut down.\n"
         "\n"
         "  CALL_SET = interval ( '/' frequency )\n"
         "  interval = '*' | number | start_number '-' end_number\n"
@@ -134,7 +136,6 @@ const std::vector<std::string> split_string(const std::string& str, const char& 
 bool ParseCommandLine(int argc, char** argv, RetraceOptions& mOptions)
 {
     bool streamline_collector = false;
-    bool usedFramerange = false;
 
     // Parse all except first (executable name)
     for (int i = 1; i < argc; ++i)
@@ -220,7 +221,6 @@ bool ParseCommandLine(int argc, char** argv, RetraceOptions& mOptions)
                 DBG_LOG("Start frame must be lower than end frame. (End frame is never played.)\n");
                 return false;
             }
-            usedFramerange = true;
         } else if (!strcmp(arg, "-instrumentation-delay")) {
             mOptions.mInstrumentationDelay = readValidValue(argv[++i]);
         } else if (!strcmp(arg, "-all")) {
@@ -262,6 +262,8 @@ bool ParseCommandLine(int argc, char** argv, RetraceOptions& mOptions)
             streamline_collector = true;
         } else if (!strcmp(arg, "-flushonswap")) {
             mOptions.mFinishBeforeSwap = true;
+        } else if (!strcmp(arg, "-intervalswap")) {
+            mOptions.mIntervalSwap = true;
         } else if (!strcmp(arg, "-flush")) {
             mOptions.mFlushWork = true;
         } else if (!strcmp(arg, "-infojson")) {
@@ -333,7 +335,9 @@ bool ParseCommandLine(int argc, char** argv, RetraceOptions& mOptions)
             }
         } else if (!strcmp(arg, "-script")) {
             mOptions.mScriptPath = argv[++i];
-            mOptions.mScriptFrame = readValidValue(argv[++i]);
+            mOptions.mScriptCallSet = new common::CallSet(argv[++i]);
+        } else if (!strcmp(arg, "-patch")) {
+            mOptions.mPatchPath = argv[++i];
         } else if (strstr(arg, "-libEGL")) {
             SetCommandLineEGLPath(argv[++i]);
         } else if (strstr(arg, "-libGLESv1")) {
@@ -414,7 +418,7 @@ bool ParseCommandLine(int argc, char** argv, RetraceOptions& mOptions)
         }
     }
 
-    if (mOptions.mCallStats && !usedFramerange)
+    if (mOptions.mCallStats && (mOptions.mEndMeasureFrame == INT32_MAX))
     {
         DBG_LOG("-callstats requires -framerange.\n");
         return false;

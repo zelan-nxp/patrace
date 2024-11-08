@@ -338,6 +338,9 @@ public class GLThread extends Thread {
                 if(parentIntent.hasExtra("step")){
                     js.put("step", parentIntent.getBooleanExtra("step", false));
                 }
+                if(parentIntent.hasExtra("translucent_surface")){
+                    js.put("translucent_surface", parentIntent.getBooleanExtra("translucent_surface", false));
+                }
 
                 if (parentIntent.hasExtra("perfstart") && parentIntent.hasExtra("perfend")) {
                     int perf_start = parentIntent.getIntExtra("perfstart", -1);
@@ -363,9 +366,9 @@ public class GLThread extends Thread {
 
                 if(parentIntent.hasExtra("scriptpath")){
                     js.put("scriptpath", parentIntent.getStringExtra("scriptpath"));
-                    js.put("scriptframe", parentIntent.getIntExtra("scriptframe", -1));
+                    js.put("scriptcallset", parentIntent.getStringExtra("scriptcallset"));
                 }
-
+                js.put("intervalswap", parentIntent.getBooleanExtra("intervalswap", false));
                 js.put("finishBeforeSwap", parentIntent.getBooleanExtra("finishBeforeSwap", false));
                 js.put("flushWork", parentIntent.getBooleanExtra("flushWork", false));
                 js.put("runAllCalls", parentIntent.getBooleanExtra("runAllCalls", false));
@@ -441,6 +444,8 @@ public class GLThread extends Thread {
             Log.e(TAG, "Could not initialise the retracer from JSON!");
             return;
         }
+        NativeAPI.translucent_surfaceView = NativeAPI.loadAndroidRetraceOptionsFromHeader();
+        if(NativeAPI.translucent_surfaceView) Log.i(TAG, "Enabled translucent_surface option on Android replay");
 
         Log.i(TAG, "Initialised the retracer from JSON: " + json_data);
 

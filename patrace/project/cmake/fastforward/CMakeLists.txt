@@ -64,6 +64,6 @@ add_dependencies(fastforward
     call_parser_src_generation
     glxml_header
 )
-set_target_properties(fastforward PROPERTIES LINK_FLAGS "-pthread" COMPILE_FLAGS "-pthread")
+set_target_properties(fastforward PROPERTIES LINK_FLAGS "-pthread -z max-page-size=16384" COMPILE_FLAGS "-pthread")
 install(TARGETS fastforward
     RUNTIME DESTINATION bin)

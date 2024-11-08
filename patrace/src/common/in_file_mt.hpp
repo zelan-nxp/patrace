@@ -34,6 +34,8 @@ public:
         return s;
     }
 
+    bool OpenPatchFile(const char* name);
+
     int curCallNo = -1;
 
 private:
@@ -61,7 +63,12 @@ private:
     char *mCompressedBuffer = nullptr;
     char *mCompressedSource = nullptr;
     int mFrameNo = 0;
-    int mFd = 0;
+    int mFd = -1;
+
+    int mPatchFd = -1;
+    int64_t mPatchSize = 0;
+    char *mPatchPtr = nullptr;
+    uint32_t mNextPatchCall = UINT32_MAX;
 };
 
 }

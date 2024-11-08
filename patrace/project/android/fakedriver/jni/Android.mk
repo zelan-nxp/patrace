@@ -30,11 +30,11 @@ LOCAL_C_INCLUDES:= \
 
 LOCAL_CFLAGS    := -O3 -D__arm__ -D__gnu_linux__ $(PA_BUILD_64BIT) -fvisibility=hidden -Wno-attributes
 LOCAL_LDLIBS    := -nodefaultlibs -lc -lm -lz -llog -ldl
-LOCAL_CPPFLAGS  += -std=c++11
+LOCAL_CPPFLAGS  += -std=c++14
 LOCAL_CFLAGS_arm += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_SHARED_LIBRARY)
 
 
@@ -59,11 +59,11 @@ LOCAL_C_INCLUDES:= \
 
 LOCAL_CFLAGS    := -O3 -D__arm__ -D__gnu_linux__ $(PA_BUILD_64BIT) -fvisibility=hidden -Wno-attributes
 LOCAL_LDLIBS    := -nodefaultlibs -lc -lm -lz -llog -ldl
-LOCAL_CPPFLAGS  += -std=c++11
+LOCAL_CPPFLAGS  += -std=c++14
 LOCAL_CFLAGS_arm += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_SHARED_LIBRARY)
 
 
@@ -89,11 +89,11 @@ LOCAL_C_INCLUDES:= \
 LOCAL_CFLAGS    := -O3 -D__arm__ -D__gnu_linux__ $(PA_BUILD_64BIT) -fvisibility=hidden -Wno-attributes
 LOCAL_LDLIBS    := -nodefaultlibs -lc -lm -lz -llog -ldl
 LOCAL_SHARED_LIBRARIES := libEGL_wrapper_$(TARGET_ARCH)
-LOCAL_CPPFLAGS  += -std=c++11
+LOCAL_CPPFLAGS  += -std=c++14
 LOCAL_CFLAGS_arm += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_SHARED_LIBRARY)
 
 
@@ -121,9 +121,9 @@ LOCAL_C_INCLUDES:= \
 
 LOCAL_CFLAGS    := -O3 -D__arm__ -D__gnu_linux__ $(PA_BUILD_64BIT) -fvisibility=hidden -Wno-attributes
 LOCAL_LDLIBS    := -nodefaultlibs -lc -lm -lz -llog -ldl
-LOCAL_CPPFLAGS  += -std=c++11
+LOCAL_CPPFLAGS  += -std=c++14
 LOCAL_CFLAGS_arm += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_SHARED_LIBRARY)

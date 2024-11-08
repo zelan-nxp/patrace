@@ -74,7 +74,7 @@ generate_sources()
 
 patrace_extension = setuptools.Extension(
     '_patrace',
-    extra_compile_args=['-std=c++11'],
+    extra_compile_args=['-std=c++14'],
     include_dirs=[
         'src',
         'common',

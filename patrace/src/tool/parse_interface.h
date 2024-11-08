@@ -194,9 +194,15 @@ struct ResourceStorage
     inline T& id(GLuint id) { int idx; idx = share->remapping.at(id); return at(idx); }
     inline int remap(GLuint id) const { return share->remapping.at(id); }
     inline bool contains(GLuint id) const { return share->remapping.count(id) > 0; }
-    const std::vector<T>& all() const { return share->store; }
+
     size_t size() const { return share->store.size(); }
     ssize_t ssize() const { return static_cast<ssize_t>(share->store.size()); }
+    auto begin() { return share->store.begin(); }
+    auto end() { return share->store.end(); }
+    auto cbegin() const { return share->store.begin(); }
+    auto cend() const { return share->store.end(); }
+    auto begin() const { return share->store.begin(); }
+    auto end() const { return share->store.end(); }
 
     inline T & add(GLuint _id)
     {
@@ -422,6 +428,7 @@ struct Program : public Resource
     std::map<GLenum, int> shaders; // attached shaders, by index
     bool link_status = false;
     std::string md5sum; // md5sum of the combined source of all shaders, for matching with shaders in dumps
+    bool used = false;
 
     // The following members are only set when used in replay mode
     GLint activeAttributes = 0;
@@ -622,6 +629,20 @@ struct Context : public Resource
     int patchSize = 3;
     std::map<GLenum, bool> enabled;
 
+    std::unordered_map<GLenum, int> program_stages()
+    {
+        std::unordered_map<GLenum, int> stages;
+        if (program_index != UNBOUND)
+        {
+            stages[GL_NONE] = program_index;
+        }
+        else
+        {
+            stages = program_pipelines.at(program_pipeline_index).program_stages;
+        }
+        return stages;
+    }
+
     Context(int _id, int _display, int _index, int _share_context, Context* _share)
             : Resource(_id, _index), display(_display), share_context(_share_context),
               framebuffers(nullptr, 0),
@@ -813,7 +834,6 @@ private:
     unsigned _curFrameIndex = 0;
     common::FrameTM* _curFrame = nullptr;
     unsigned _curCallIndexInFrame = 0;
-    int mCallNo = 0;
 };
 
 #endif

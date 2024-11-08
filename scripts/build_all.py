@@ -358,7 +358,6 @@ def build_cmake(src_path, build_base_dir, install_base_dir):
                         project_path=product['path'],
                         log_file=log,
                         cmake_defines=product.get('cmake_defines', [])
-                        #make_target='package',
                     )
 
                 # open the log and check errors

@@ -32,3 +32,4 @@ target_link_libraries(testharness
     ${PNG_LIBRARIES}
     ${ZLIB_LIBRARIES}
 )
+set_target_properties(testharness PROPERTIES LINK_FLAGS "-z,max-page-size=16384")

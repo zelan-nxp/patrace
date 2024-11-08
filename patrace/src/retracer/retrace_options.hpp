@@ -31,6 +31,7 @@ struct RetraceOptions
     ~RetraceOptions()
     {
         delete mSnapshotCallSet;
+        delete mScriptCallSet;
     }
 
     std::string         mFileName;
@@ -83,6 +84,7 @@ struct RetraceOptions
     bool                mForceSingleWindow = false;
     bool                mMultiThread = false;
     bool                mCallStats = false;
+    bool                mTranslucentSurface = false;
 
     bool                mPbufferRendering = false;
     int                 mSingleSurface = -1;
@@ -98,6 +100,7 @@ struct RetraceOptions
     std::string         mPerfCmd = "";
 
     bool                mFinishBeforeSwap = false;
+    bool                mIntervalSwap = false;
     bool                mPerfmon = false;
     int                 mOverrideMSAA = -1;
 
@@ -126,7 +129,8 @@ struct RetraceOptions
     Json::Value         mCollectorValue;
 
     std::string         mScriptPath;
-    int                 mScriptFrame = -1;
+    common::CallSet*    mScriptCallSet = nullptr;
+    std::string         mPatchPath;
     unsigned int        mInstrumentationDelay = 0;
     bool                mSkipFence = false;
     std::vector<std::pair<unsigned int, unsigned int>> mSkipFenceRanges;

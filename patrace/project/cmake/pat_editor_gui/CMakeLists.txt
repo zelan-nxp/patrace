@@ -59,7 +59,7 @@ target_link_libraries (pat_editor_gui
     ${SNAPPY_LIBRARIES}
     jsoncpp
 )
-
+set_target_properties(pat_editor_gui PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies (pat_editor_gui call_parser_src_generation)
 
 install (TARGETS pat_editor_gui DESTINATION tools)

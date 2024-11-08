@@ -250,6 +250,13 @@ void getTexRenderBufInfo(GLenum attachment, GLenum &readTexFormat, GLenum &readT
             isDepth = false;
             channel = 1;        // 8bits, need a 1-channel png file to store it
         }
+        else if (internalFormat == GL_RG8)
+        {
+            readTexFormat = GL_RG_EXT;
+            readTexType = GL_UNSIGNED_BYTE;
+            isDepth = false;
+            channel = 2;        // 16bits, need a 2-channel png file to store it
+        }
         else if (internalFormat == GL_RG16F)
         {
             readTexFormat = GL_RG_EXT;

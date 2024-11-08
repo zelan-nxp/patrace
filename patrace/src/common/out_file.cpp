@@ -5,37 +5,25 @@
 #include <common/api_info.hpp>
 #include <common/pa_exception.h>
 
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+
 #include <snappy.h> // Compression
+
+#ifndef MADV_FREE
+#define MADV_FREE 8
+#endif
 
 namespace common {
 
-OutFile::OutFile()
- : mHeader()
- , mIsOpen(false)
- , mCache(NULL)
- , mCacheLen(0)
- , mCacheP(NULL)
- , mCompressedCache(NULL)
- , mCompressedCacheLen(0)
- , mFileName()
-{}
-
-OutFile::OutFile(const char *name)
- : mHeader()
- , mIsOpen(false)
- , mCache(NULL)
- , mCacheLen(0)
- , mCacheP(NULL)
- , mCompressedCache(NULL)
- , mCompressedCacheLen(0)
- , mFileName()
+void OutFile::Init()
 {
-    Open(name);
-}
-
-OutFile::~OutFile()
-{
-    Close();
+    mCache = (char*)mmap(nullptr, SNAPPY_MAX_SIZE, PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mCompressedCache = (char*)mmap(nullptr, SNAPPY_MAX_SIZE, PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mCacheP = mCache;
 }
 
 bool OutFile::Open(const char* name, bool writeSigBook, const std::vector<std::string> *sigbook, bool write_timestamp)
@@ -77,7 +65,6 @@ bool OutFile::Open(const char* name, bool writeSigBook, const std::vector<std::s
         mHeader.jsonFileEnd = jsonEnd; // is this more robust than calculating it beforehand, assuming all bytes we have is header+jsonMaxLength?
     }
 
-    CreateCache(SNAPPY_CHUNK_SIZE);
     if (writeSigBook)
     {
         if (sigbook)
@@ -89,10 +76,16 @@ bool OutFile::Open(const char* name, bool writeSigBook, const std::vector<std::s
     return true;
 }
 
+OutFile::~OutFile()
+{
+    Close();
+    munmap(mCache, SNAPPY_MAX_SIZE);
+    munmap(mCompressedCache, SNAPPY_MAX_SIZE);
+}
+
 void OutFile::Close()
 {
-    if (!mIsOpen)
-        return;
+    if (!mIsOpen) return;
 
     Flush();
     fseek(mStream, 0, SEEK_SET);
@@ -102,27 +95,23 @@ void OutFile::Close()
     fclose(mStream);
     DBG_LOG("Close trace file %s\n", mFileName.c_str());
 
-    delete [] mCache;
-    mCache = NULL;
-    mCacheLen = 0;
-    mCacheP = NULL;
-    delete [] mCompressedCache;
-    mCompressedCache = NULL;
-    mCompressedCacheLen = 0;
+    mCacheP = mCache;
 }
 
 void OutFile::Flush()
 {
-    unsigned int len = UsedSize();
-    if (len == 0)
-        return;
-
-    size_t compressedLen;
+    size_t len = UsedSize();
+    if (len == 0) return;
+    size_t compressedLen = 0;
     ::snappy::RawCompress(mCache, len, mCompressedCache, &compressedLen);
     WriteCompressedLength((unsigned int)compressedLen);
     filewrite(mCompressedCache, compressedLen);
     fflush(mStream);
     mCacheP = mCache;
+
+    // tell kernel that we no longer use any of this memory and the underlying pages can be freed as needed
+    madvise(mCache, len, MADV_FREE);
+    madvise(mCompressedCache, compressedLen, MADV_FREE);
 }
 
 void OutFile::FlushHeader()
@@ -136,14 +125,16 @@ void OutFile::FlushHeader()
 
 void OutFile::WriteHeader(const char* buf, unsigned int len, bool verbose)
 {
-    if (!mIsOpen) {
+    if (!mIsOpen)
+    {
         DBG_LOG("cant write header when file is closed!\n");
         return;
     }
 
     // write variable length header to beginning of file, then seek back to previous file put position
     Flush(); // flush last compressed part
-    if ( len > mHeader.jsonMaxLength ) {
+    if (len > mHeader.jsonMaxLength)
+    {
         DBG_LOG("Error: json file too long for header, %d > %d\n", len, mHeader.jsonMaxLength);
         os::abort();
     } else {
@@ -159,21 +150,6 @@ void OutFile::WriteHeader(const char* buf, unsigned int len, bool verbose)
 
         FlushHeader();
     }
-}
-
-void OutFile::CreateCache(int len)
-{
-    if (len <= mCacheLen)
-        return;
-
-    delete [] mCache;
-    delete [] mCompressedCache;
-
-    mCacheLen = len;
-    mCompressedCacheLen = snappy::MaxCompressedLength(mCacheLen);
-    mCache = new char[mCacheLen];
-    mCacheP = mCache;
-    mCompressedCache = new char[mCompressedCacheLen];
 }
 
 void OutFile::WriteSigBook(const std::vector<std::string> *sigbook, bool write_timestamp)

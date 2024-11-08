@@ -20,7 +20,7 @@ LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__ -Wno-attributes
 LOCAL_CFLAGS_arm   += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -38,11 +38,11 @@ LOCAL_SRC_FILES 	:= \
 
 LOCAL_C_INCLUDES 	:=
 LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__ -Wno-attributes
-LOCAL_CPPFLAGS      += -std=c++11
+LOCAL_CPPFLAGS      += -std=c++14
 LOCAL_CFLAGS_arm   += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -61,7 +61,7 @@ LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__ -DJSON_USE_EXCEPTION=0 -Wno-a
 LOCAL_CFLAGS_arm   += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -96,7 +96,7 @@ LOCAL_MULTILIB := both
 LOCAL_CFLAGS_arm   += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -132,11 +132,11 @@ LOCAL_C_INCLUDES 	:= \
     $(LOCAL_PATH)/../../thirdparty/opengl-registry/api
 
 LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__ $(PA_BUILD_64BIT) -Wno-attributes
-LOCAL_CPPFLAGS          += -std=c++11
+LOCAL_CPPFLAGS          += -std=c++14
 LOCAL_CFLAGS_arm   += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -160,11 +160,11 @@ LOCAL_C_INCLUDES 	:= \
     $(LOCAL_PATH)/../../thirdparty/opengl-registry/api
 
 LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__ $(PA_BUILD_64BIT) -Wno-attributes
-LOCAL_CPPFLAGS          += -std=c++11
+LOCAL_CPPFLAGS          += -std=c++14
 LOCAL_CFLAGS_arm   += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -199,12 +199,12 @@ LOCAL_C_INCLUDES 	:= \
     $(LOCAL_PATH)/../../thirdparty/snappy
 
 LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__ -Wno-attributes
-LOCAL_CPPFLAGS          += -std=c++11
+LOCAL_CPPFLAGS          += -std=c++14
 LOCAL_CFLAGS_arm   += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
 
 LOCAL_STATIC_LIBRARIES := common graphicbuffer snappy md5 jsoncpp png
 LOCAL_LDLIBS        := -nodefaultlibs -lc -lm -llog -ldl -lz
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_SHARED_LIBRARY)

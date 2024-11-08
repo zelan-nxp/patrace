@@ -46,12 +46,22 @@
 typedef void (GLES_CALLCONVENTION * PFN_GLGETTEXLEVELPARAMETERIV)(GLenum target, GLint level, GLenum pname, GLint *params);
 static PFN_GLGETTEXLEVELPARAMETERIV ff_glGetTexLevelParameteriv;
 
+#define OPTIMIZE_BIT 2
+
 enum FastForwardOptionFlags
 {
     FASTFORWARD_RESTORE_TEXTURES      = 1 << 0,
     FASTFORWARD_RESTORE_DEFAUTL_FBO   = 1 << 1,
-    FASTFORWARD_REMOVE_UNUSED_TEXTURE = 1 << 2,
-    FASTFORWARD_REMOVE_UNUSED_SHADER  = 1 << 3
+    FASTFORWARD_REMOVE_UNUSED_TEXTURE = 1 << OPTIMIZE_BIT,
+    FASTFORWARD_REMOVE_UNUSED_BUFFER  = 1 << (OPTIMIZE_BIT+1),
+    FASTFORWARD_REMOVE_UNUSED_SHADER  = 1 << (OPTIMIZE_BIT+2),
+    FASTFORWARD_REMOVE_UNUSED_MIPMAP  = 1 << (OPTIMIZE_BIT+3),
+    FASTFORWARD_NO_RESTORE_UNUSED_TEXTURE = 1 << (OPTIMIZE_BIT+4),
+    FASTFORWARD_NO_RESTORE_UNUSED_BUFFER  = 1 << (OPTIMIZE_BIT+5),
+    FASTFORWARD_REMOVE_TEXTURE_SUBIMAGE    = 1 << (OPTIMIZE_BIT+6),
+    FASTFORWARD_REMOVE_COPY_IMG_SUBDATA    = 1 << (OPTIMIZE_BIT+7),
+    FASTFORWARD_REMOVE_BUF_SUBDATA         = 1 << (OPTIMIZE_BIT+8),
+    FASTFORWARD_REMOVE_BUF_MAP             = 1 << (OPTIMIZE_BIT+9),
 };
 
 struct FastForwardOptions
@@ -114,16 +124,18 @@ struct context
     GlobalTextureIdTracer gTextureIdTracer;
     GlobalTextureIdTracer gShaderIdTracer;
     GlobalTextureIdTracer gBufferIdTracer;
+    GlobalTextureIdTracer gProgramIdTracer;
 
     context(int _id, int _index, int _share_context, context* _share)
-            : id(_id), index(_index), share_context(_share_context), gTextureIdTracer(&_share->gTextureIdTracer), gShaderIdTracer(&_share->gShaderIdTracer),gBufferIdTracer(&_share->gBufferIdTracer)
+            : id(_id), index(_index), share_context(_share_context), gTextureIdTracer(&_share->gTextureIdTracer),
+              gShaderIdTracer(&_share->gShaderIdTracer), gBufferIdTracer(&_share->gBufferIdTracer), gProgramIdTracer(&_share->gProgramIdTracer)
     {
         if(!_share)
             gBufferIdTracer.add(0);
     }
 
     context(int _id, int _index)
-            : id(_id), index(_index), share_context(0), gTextureIdTracer(), gShaderIdTracer()
+            : id(_id), index(_index), share_context(0), gTextureIdTracer(), gShaderIdTracer(), gProgramIdTracer()
     {
         gBufferIdTracer.add(0);
     }
@@ -131,15 +143,20 @@ struct context
 };
 
 std::deque<context> contexts;
+std::unordered_map<GLuint, std::unordered_set<unsigned int>> unusedprogram;
 std::map<int, int> context_remapping; //context id<->idx
 std::map<int, int> current_context; // map threads to contexts
 unsigned int gRemovedMipgen  = 0;
 unsigned int gRemovedTexFunc = 0;
-unsigned int gRemovedTexture = 0;
-unsigned int gRemovedBuffer = 0;
+unsigned int gRemovedBufferFunc = 0;
 unsigned int gRemovedShaderFunc = 0;
+unsigned int gRemovedProgramFunc = 0;
+unsigned int gUnsavedBuffer = 0;
+unsigned int gUnsavedTexture = 0;
+
 std::map<int, std::unordered_set<unsigned int>> map_unusedTexture;
 std::map<int, std::unordered_set<unsigned int>> map_unusedShader;
+std::map<int, std::unordered_set<unsigned int>> map_unusedProgram;
 std::map<int, std::unordered_set<unsigned int>> map_unusedBuffer;
 std::unordered_set<unsigned int> gUnusedMipgen; // call id of redundant glGenerateMipmap()
 
@@ -190,6 +207,7 @@ public:
         , mGlGenBuffersId(getId("glGenBuffers"))
         , mGlDeleteBuffersId(getId("glDeleteBuffers"))
         , mGlBufferDataId(getId("glBufferData"))
+        , mGlBufferSubDataId(getId("glBufferSubData"))
         , mGlBindBufferId(getId("glBindBuffer"))
         , mGlMapBufferRangeId(getId("glMapBufferRange"))
         , mGlUnmapBufferId(getId("glUnmapBuffer"))
@@ -299,6 +317,28 @@ public:
         // Write BCall_vlen to bufStart
         int toNext = tmpBuf - bufStart;
         writeBCall_vlen(bufStart, mGlBufferDataId, toNext);
+
+        mOutFile.Write(bufStart, toNext);
+    }
+
+    void emitBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid* data)
+    {
+        mScratchBuff.resizeToFit(sizeof(common::BCall_vlen) + sizeof(int) * 3 + size + 32);
+
+        char* const bufStart = mScratchBuff.bufferPtr();
+        char* tmpBuf = bufStart;
+
+        // Make room for BCall_vlen at start of buffer
+        tmpBuf += sizeof(common::BCall_vlen);
+
+        tmpBuf = common::WriteFixed<int>(tmpBuf, target); // enum
+        tmpBuf = common::WriteFixed<int>(tmpBuf, offset); // literal
+        tmpBuf = common::WriteFixed<int>(tmpBuf, size); // literal
+        tmpBuf = common::Write1DArray<char>(tmpBuf, (unsigned int)size, (const char*)data); // blob
+
+        // Write BCall_vlen to bufStart
+        int toNext = tmpBuf - bufStart;
+        writeBCall_vlen(bufStart, mGlBufferSubDataId, toNext);
 
         mOutFile.Write(bufStart, toNext);
     }
@@ -930,6 +970,7 @@ private:
     int mGlGenBuffersId;
     int mGlDeleteBuffersId;
     int mGlBufferDataId;
+    int mGlBufferSubDataId;
     int mGlBindBufferId;
     int mGlMapBufferRangeId;
     int mGlUnmapBufferId;
@@ -989,7 +1030,7 @@ private:
         bcall.tid = mThreadId;
         bcall.reserved = 0;
         bcall.errNo = 0;
-        bcall.source = 0;
+        bcall.source = 1;
 
         unsigned int bcallSize = sizeof(bcall);
         memcpy(dest, &bcall, bcallSize);
@@ -1005,7 +1046,7 @@ private:
         bcv.reserved = 0;
         bcv.errNo = 0;
         bcv.toNext = toNext;
-        bcv.source = 0;
+        bcv.source = 1;
 
         unsigned int bcallSize = sizeof(bcv);
         memcpy(dest, &bcv, bcallSize);
@@ -1053,7 +1094,7 @@ public:
         {
             const unsigned int traceBufferId = it.first;
             const unsigned int retraceBufferId = it.second;
-            if ((flags & FASTFORWARD_REMOVE_UNUSED_TEXTURE))
+            if ((flags & FASTFORWARD_NO_RESTORE_UNUSED_BUFFER))
             {
                 const unsigned int globalBufferId = contexts[current_context[threadId]].gBufferIdTracer.remap().at(traceBufferId);
 
@@ -1064,7 +1105,8 @@ public:
 
                 if (map_unusedBuffer[current_context[threadId]].count(globalBufferId) != 0)
                 {
-                    gRemovedBuffer++;
+                    DBG_LOG("Don't restore unused buffer %d.\n", traceBufferId);
+                    gUnsavedBuffer++;
                     continue;
                 }
             }
@@ -1093,17 +1135,20 @@ public:
                     continue;
                 }
 
-                GLint storage_bits;
+                GLint storage_bits = 0;
+                GLint immutable_storage = 0;
+                _glGetBufferParameteriv (GL_ARRAY_BUFFER, GL_BUFFER_IMMUTABLE_STORAGE_EXT, &immutable_storage);
                 _glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_STORAGE_FLAGS_EXT, &storage_bits);
                 GLint new_access = storage_bits & (GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
-                if (!new_access)
+
+                if (immutable_storage && !new_access)
                 {
                     // GL_INVALID_OPERATION is generated for any of the following conditions:
                     // Any of GL_MAP_READ_BIT, GL_MAP_WRITE_BIT, GL_MAP_PERSISTENT_BIT, or GL_MAP_COHERENT_BIT are set, but the same bit is not included in the buffer's storage flags.
                     // So we need to make sure that the new access are consistent with the previous GL_BUFFER_STORAGE_FLAGS
                     // In some cases, there may be neither GL_MAP_READ_BIT nor GL_MAP_WRITE_BIT in GL_BUFFER_STORAGE_FLAGS, it can't be mapped into the client's address space.
                     // For these buffers, we don't need and can't save them and continue to save the next buffer.
-                    DBG_LOG("Got 0 as new_access. Skip saving a buffer\n");
+                    DBG_LOG("Neither MAP_READ_BIT nor MAP_WRITE_BIT is set in BUFFER_STORAGE_FLAGS for immutable buffer %d. Skip saving it.\n", traceBufferId);
                     continue;
                 }
 
@@ -1123,7 +1168,7 @@ public:
                 }
 
                 // Map and output to trace
-                void* data = _glMapBufferRange(GL_ARRAY_BUFFER, 0, buffLength, new_access);
+                void* data = _glMapBufferRange(GL_ARRAY_BUFFER, 0, buffLength, (immutable_storage==0)? GL_MAP_READ_BIT : new_access);
                 {
                     if (!data)
                     {
@@ -1131,8 +1176,8 @@ public:
                         os::abort();
                     }
 
-                    // Emit glBufferData(GL_ARRAY_BUFFER, len, data, usage);
-                    traceCommandEmitter.emitBufferData(GL_ARRAY_BUFFER, buffLength, data, buffUsage);
+                    // Emit glBufferSubData(GL_ARRAY_BUFFER, 0, len, data);
+                    traceCommandEmitter.emitBufferSubData(GL_ARRAY_BUFFER, 0, buffLength, data);
                 }
                 _glUnmapBuffer(GL_ARRAY_BUFFER);
                 if (pre_mapped)
@@ -1275,7 +1320,7 @@ public:
             const unsigned int traceTextureId = it.first;
             const unsigned int retraceTextureId = it.second;
 
-            if ((mFlags & FASTFORWARD_REMOVE_UNUSED_TEXTURE))
+            if ((mFlags & FASTFORWARD_NO_RESTORE_UNUSED_TEXTURE))
             {
                 const unsigned int globalTextureId = contexts[current_context[mThreadId]].gTextureIdTracer.remap().at(traceTextureId);
 
@@ -1286,7 +1331,8 @@ public:
 
                 if (map_unusedTexture[current_context[mThreadId]].count(globalTextureId) != 0)
                 {
-                    gRemovedTexture++;
+                    DBG_LOG("Don't restore unused texture %d.\n", traceTextureId);
+                    gUnsavedTexture++;
                     continue;
                 }
             }
@@ -1481,7 +1527,7 @@ public:
         // Find number of mipmap levels
         GLint maxLevel;
         GLint baseLevel;
-        if (target == GL_TEXTURE_CUBE_MAP_POSITIVE_X) {
+        if (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z) {
             _glGetTexParameteriv(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, &maxLevel);
             _glGetTexParameteriv(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, &baseLevel);
         }
@@ -3002,7 +3048,7 @@ bool checkUnusedTexture(unsigned int mfflag)
             contexts.emplace_back(ret, contexts.size());
         }
     }
-    if (strstr(funcName, "eglMakeCurrent")) // find contexts that are used
+    else if (strstr(funcName, "eglMakeCurrent")) // find contexts that are used
     {
         char* src = gRetracer.src;
         int ret;
@@ -3032,8 +3078,7 @@ bool checkUnusedTexture(unsigned int mfflag)
             current_context[cur_thread] = context_remapping.at(ctx);
         }
     }
-
-    if (strstr(funcName, "glGenTexture"))
+    else if (strstr(funcName, "glGenTexture"))
     {
         char* src = gRetracer.src;
         int n;
@@ -3046,7 +3091,6 @@ bool checkUnusedTexture(unsigned int mfflag)
                 contexts[current_context[cur_thread]].gTextureIdTracer.add(textures[i]);
         }
     }
-
     else if (strstr(funcName, "glBindTexture"))
     {
         char* src = gRetracer.src;
@@ -3061,7 +3105,6 @@ bool checkUnusedTexture(unsigned int mfflag)
             contexts[current_context[cur_thread]].gTextureIdTracer.add(texture);
         }
     }
-
     else if (strstr(funcName, "glDeleteTextures"))
     {
         char* src = gRetracer.src;
@@ -3075,7 +3118,6 @@ bool checkUnusedTexture(unsigned int mfflag)
                 contexts[current_context[cur_thread]].gTextureIdTracer.remove(textures[i]);
         }
     }
-
     else if (strstr(funcName, "glGenBuffer"))
     {
         char* src = gRetracer.src;
@@ -3091,8 +3133,7 @@ bool checkUnusedTexture(unsigned int mfflag)
             }
         }
     }
-
-    else if (strstr(funcName, "glBindBuffer"))
+    else if (strcmp(funcName, "glBindBuffer")==0)
     {
         char* src = gRetracer.src;
         int target;
@@ -3106,7 +3147,21 @@ bool checkUnusedTexture(unsigned int mfflag)
             contexts[current_context[cur_thread]].gBufferIdTracer.add(buffer);
         }
     }
-
+    else if (strcmp(funcName, "glBindBufferRange")==0 || strcmp(funcName, "glBindBufferBase")==0)
+    {
+        char* src = gRetracer.src;
+        int target;
+        src = common::ReadFixed<int>(src, target);
+        unsigned int ind;
+        src = common::ReadFixed<unsigned int>(src, ind);
+        unsigned int id;
+        src = common::ReadFixed<unsigned int>(src, id);
+        if (id != 0 && !contexts[current_context[cur_thread]].gBufferIdTracer.remap().count(id))
+        {
+            // It is legal to create objects with a call to this function.
+            contexts[current_context[cur_thread]].gBufferIdTracer.add(id);
+        }
+    }
     else if (strstr(funcName, "glDeleteBuffers"))
     {
         char* src = gRetracer.src;
@@ -3120,7 +3175,6 @@ bool checkUnusedTexture(unsigned int mfflag)
                 contexts[current_context[cur_thread]].gBufferIdTracer.remove(buffers[i]);
         }
     }
-
     else if (strstr(funcName, "glCreateShader"))
     {
         char* src = gRetracer.src;
@@ -3131,17 +3185,17 @@ bool checkUnusedTexture(unsigned int mfflag)
         if (contexts[current_context[cur_thread]].gShaderIdTracer.remap().count(ret) == 0)
             contexts[current_context[cur_thread]].gShaderIdTracer.add(ret);
     }
-
-    else if (strstr(funcName, "glDeleteShader"))
+    else if (strstr(funcName, "glCreateProgram"))
     {
         char* src = gRetracer.src;
-        unsigned int shader;
-        src = common::ReadFixed<unsigned int>(src, shader);
-        if (contexts[current_context[cur_thread]].gShaderIdTracer.remap().count(shader) != 0)
-            contexts[current_context[cur_thread]].gShaderIdTracer.remove(shader);
+        unsigned int ret;
+        src = common::ReadFixed<unsigned int>(src, ret);
+
+        if (contexts[current_context[cur_thread]].gProgramIdTracer.remap().count(ret) == 0)
+            contexts[current_context[cur_thread]].gProgramIdTracer.add(ret);
     }
 
-    if ((mfflag & FASTFORWARD_REMOVE_UNUSED_TEXTURE))
+    if ((mfflag & FASTFORWARD_REMOVE_UNUSED_MIPMAP))
     {
         if (strstr(funcName, "glGenerateMipmap"))
         {
@@ -3151,7 +3205,33 @@ bool checkUnusedTexture(unsigned int mfflag)
                 return true;
             }
         }
+    }
 
+    if ((mfflag & FASTFORWARD_REMOVE_UNUSED_BUFFER))
+    {
+        if ( strstr(funcName, "glMapBuffer")
+             || strstr(funcName, "glUnmapBuffer")
+             || strcmp(funcName, "glCopyClientSideBuffer")==0 )
+        {
+            char *src = gRetracer.src;
+            GLenum target;
+            src = common::ReadFixed<GLenum>(src, target);
+            GLint retraceBufferId = getBoundBuffer(target);
+            Context& context = gRetracer.getCurrentContext();
+            GLuint traceBufferId = context.getBufferRevMap().RValue((GLuint)retraceBufferId);
+            GLuint globalBufferId = contexts[current_context[cur_thread]].gBufferIdTracer.remap().at(traceBufferId);
+            if (map_unusedBuffer[current_context[cur_thread]].count(globalBufferId) && traceBufferId != 0)
+            {
+                gRemovedBufferFunc++;
+                DBG_LOG("removed \"%s\" for unused buffer %d\n", funcName, traceBufferId);
+                return true;
+            }
+
+        }
+    }
+
+    if ((mfflag & FASTFORWARD_REMOVE_UNUSED_TEXTURE))
+    {
         if (strstr(funcName, "glTexImage")
             || strstr(funcName, "glTexStorage")
             || strstr(funcName, "glTexSubImage")
@@ -3174,51 +3254,147 @@ bool checkUnusedTexture(unsigned int mfflag)
             }
         }
     }
+
     if ((mfflag & FASTFORWARD_REMOVE_UNUSED_SHADER))
     {
         if (strcmp(funcName, "glShaderSource") == 0
             || strcmp(funcName, "glCompileShader") == 0
-            || strcmp(funcName, "glAttachShader") == 0)
+            || strcmp(funcName, "glCreateShader") == 0
+            || strcmp(funcName, "glDeleteShader") == 0
+            || strcmp(funcName, "gIsShader") == 0
+            || strstr(funcName, "glGetShaderiv")
+            || strstr(funcName, "glGetShaderInfoLog")
+            || strstr(funcName, "glGetShaderSource"))
         {
             char* src = gRetracer.src;
             GLuint shader;
             src = common::ReadFixed<GLenum>(src, shader);
-            if (strcmp(funcName, "glAttachShader") == 0)
+            if (strcmp(funcName, "glCreateShader") == 0)
             {
                 src = common::ReadFixed<GLenum>(src, shader);
             }
             unsigned int globalShaderId = contexts[current_context[cur_thread]].gShaderIdTracer.remap().at(shader);
+
+            if (strcmp(funcName, "glDeleteShader") == 0)
+            {
+                if (contexts[current_context[cur_thread]].gShaderIdTracer.remap().count(shader) != 0)
+                    contexts[current_context[cur_thread]].gShaderIdTracer.remove(shader);
+            }
+
             if (map_unusedShader[current_context[cur_thread]].count(globalShaderId) && shader != 0)
             {
                 gRemovedShaderFunc++;
                 return true;
             }
         }
-        if (strstr(funcName, "glLinkProgram"))
+        else if (strcmp(funcName, "glCreateProgram") == 0
+            || strcmp(funcName, "glDeleteProgram") == 0
+            || strcmp(funcName, "glAttachShader") == 0
+            || strcmp(funcName, "glDetachShader") == 0
+            || strstr(funcName, "glLinkProgram")
+            || strcmp(funcName, "glUseProgram") == 0
+            || strcmp(funcName, "glUniformBlockBinding") == 0
+            || strcmp(funcName, "glBindAttribLocation") == 0
+            || strcmp(funcName, "glGetAttribLocation") == 0
+            || strcmp(funcName, "glGetActiveAttrib") == 0
+            || strstr(funcName, "glUniform")
+            || strstr(funcName, "glProgramUniform")
+            || strstr(funcName, "glProgramBinary")
+            || strstr(funcName, "glProgramParameteri")
+            || strstr(funcName, "glGetActiveUniformBlockName")
+            || strstr(funcName, "glGetActiveUniformBlockiv")
+            || strstr(funcName, "glGetActiveUniformsiv")
+            || strstr(funcName, "glGetActiveUniform")
+            || strstr(funcName, "glGetAttachedShaders")
+            || strstr(funcName, "glGetUniformBlockIndex")
+            || strstr(funcName, "glGetUniformIndices")
+            || strstr(funcName, "glGetUniformLocation")
+            || strstr(funcName, "glGetUniform")
+            || strstr(funcName, "glGetProgramBinary")
+            || strstr(funcName, "glGetProgramInfoLog")
+            || strstr(funcName, "glGetProgramiv")
+            || strstr(funcName, "glGetProgramResourceiv")
+            || strstr(funcName, "glGetProgramResourceIndex")
+            || strstr(funcName, "glGetProgramResourceLocation")
+            || strstr(funcName, "glGetProgramResourceName")
+            || strstr(funcName, "glGetProgramInterfaceiv")
+            || strstr(funcName, "glIsProgram")
+            || strstr(funcName, "glGetFragDataLocation")
+            || strstr(funcName, "glBindFragDataLocation")
+            || strstr(funcName, "glGetFragDataIndex")
+            || strstr(funcName, "glValidateProgram")
+            || strstr(funcName, "glCreateShaderProgramv") )
         {
             char* src = gRetracer.src;
-            GLuint p;
-            src = common::ReadFixed<GLenum>(src, p);
-            Context& context = gRetracer.getCurrentContext();
-            unsigned int retracePId = context.getProgramMap().RValue((unsigned int)p);
-            for (const GLuint retraceShId : gRetracer.getCurrentContext().getShaderIDs(retracePId))
+            GLuint program;
+            src = common::ReadFixed<GLuint>(src, program);
+            if(program == 0) return false;
+            if (strstr(funcName, "glUniform"))
             {
-                unsigned int traceShId = context.getShaderRevMap().RValue((unsigned int)retraceShId);
-                unsigned int globalShaderId = contexts[current_context[cur_thread]].gShaderIdTracer.remap().at(traceShId);
-                if (map_unusedShader[current_context[cur_thread]].count(globalShaderId))
-                {
-                    gRemovedShaderFunc++;
-                    return true;
-                }
+                GLint p;
+                _glGetIntegerv(GL_CURRENT_PROGRAM, &p);
+                Context& context = gRetracer.getCurrentContext();
+                unsigned int tracePId = context.getProgramRevMap().RValue((unsigned int)p);
+                program = (GLuint)tracePId;
             }
-            return false;
+            else if (strstr(funcName, "glCreateShaderProgramv"))
+            {
+                common::Array<const char*> strings;
+                src = common::ReadFixed<GLuint>(src, program);
+                src = common::ReadStringArray(src, strings);
+                src = common::ReadFixed<GLuint>(src, program);
+            }
+
+            unsigned int globalProgramId = contexts[current_context[cur_thread]].gProgramIdTracer.remap().at(program);
+            if (strcmp(funcName, "glDeleteProgram") == 0)
+            {
+                if (contexts[current_context[cur_thread]].gProgramIdTracer.remap().count(program) != 0)
+                    contexts[current_context[cur_thread]].gProgramIdTracer.remove(program);
+            }
+
+            if (map_unusedProgram[current_context[cur_thread]].count(globalProgramId) )
+            {
+                gRemovedProgramFunc++;
+                return true;
+            }
         }
     }
     return false;
 }
 
+bool checkBufferSubData()
+{
+    char* src = gRetracer.src;
+    GLenum target;
+    src = common::ReadFixed<GLenum>(src, target);
+
+    // Get buffer info
+    GLint64 buffLength = 0;
+    _glGetBufferParameteri64v(target, GL_BUFFER_SIZE, &buffLength);
+
+    // TODO: Skipping these buffers for now, but the right thing might actually be to output a glBufferData with size 0.
+    if (buffLength == 0)
+    {
+        return false;
+    }
+
+    GLint storage_bits = 0;
+    GLint immutable_storage = 0;
+    _glGetBufferParameteriv(target, GL_BUFFER_IMMUTABLE_STORAGE_EXT, &immutable_storage);
+    _glGetBufferParameteriv(target, GL_BUFFER_STORAGE_FLAGS_EXT, &storage_bits);
+
+    if ( immutable_storage && !(storage_bits & (GL_MAP_READ_BIT | GL_MAP_WRITE_BIT)) )
+    {
+        return false;
+    }
+
+    return true;
+}
+
 bool checkTexSubImage()
 {
+    bool ret = false;
+
     char* src = gRetracer.src;
     GLenum target;
     src = common::ReadFixed<GLenum>(src, target);
@@ -3227,9 +3403,19 @@ bool checkTexSubImage()
     GLint level;
     src = common::ReadFixed<GLint>(src, level);
 
+    GLenum target_binding = Texture::_targetToBinding(target);
+    GLint retraceTextureId;
+    _glGetIntegerv(target_binding, &retraceTextureId);
+    _glGetError();
+
+    Context& context = gRetracer.getCurrentContext();
+    GLint traceTexId = context.getTextureRevMap().RValue(retraceTextureId);
+    DBG_LOG("checkTexSubImage() target 0x%x, level %d, traceTexId %d.\n", target, level, traceTexId);
+
     GLint readTexFormat = texInfo.mInternalFormat;
     if (texInfo.mIsCompressed || texInfo.mInternalFormat == GL_RGB9_E5)
     {
+        DBG_LOG("Don't remove \"glTexSubImage\". %s.\n", texInfo.mIsCompressed?"compressed format":"RGB9_E5 format");
         return false;
     }
     else if (texInfo.mInternalFormat == GL_LUMINANCE ||
@@ -3242,6 +3428,7 @@ bool checkTexSubImage()
             texInfo.mInternalFormat == GL_LUMINANCE16F_EXT ||
             texInfo.mInternalFormat == GL_LUMINANCE_ALPHA16F_EXT)
     {
+        DBG_LOG("Don't remove \"%s\". internalFmt 0x%x .\n", "glTexSubImage", texInfo.mInternalFormat);
         return false;
     }
 
@@ -3279,6 +3466,7 @@ bool checkTexSubImage()
                 texInfo.mInternalFormat == GL_DEPTH_COMPONENT32F ||
                 texInfo.mInternalFormat == GL_DEPTH24_STENCIL8 || texInfo.mInternalFormat == GL_DEPTH_STENCIL)
         {
+            DBG_LOG("Remove \"%s\". DS internalFmt 0x%x .\n", "glTexSubImage", texInfo.mInternalFormat);
             return true;
         }
         else if (texInfo.mInternalFormat == GL_RG32UI)
@@ -3294,11 +3482,8 @@ bool checkTexSubImage()
             readTexFormat = GL_ALPHA;
         }
     }
-    GLenum target_binding = Texture::_targetToBinding(target);
-    GLint retraceTextureId;
-    _glGetIntegerv(target_binding, &retraceTextureId);
-    _glGetError();
 
+    GLint supported_readformat = 0;
     GLuint fbo = 0;
     GLint prev_fbo = 0;
     GLint prev_readBuff = 0;
@@ -3314,30 +3499,38 @@ bool checkTexSubImage()
     _glGenFramebuffers(1, &fbo);
     _glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
     _glReadBuffer(GL_COLOR_ATTACHMENT0);
+
     // supports GL_TEXTURE_2D, GL_TEXTURE_2D_ARRAY, GL_TEXTURE_CUBE_MAP, GL_TEXTURE_CUBE_MAP_ARRAY textures for now
     // add support for GL_TEXTURE_3D
-    if (target == GL_TEXTURE_3D || target == GL_TEXTURE_2D_ARRAY ) {
+    if (target == GL_TEXTURE_3D || target == GL_TEXTURE_2D_ARRAY || target == GL_TEXTURE_CUBE_MAP_ARRAY) {
         _glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, retraceTextureId, level, 0);
     }
     else if (target == GL_TEXTURE_2D || (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z))
     {
         _glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, retraceTextureId, level);
     }
-    else return false;
+    else
+    {
+        goto restore;
+    }
     status = _glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         DBG_LOG("glCheckFramebufferStatus error: 0x%x\n", status);
     }
-    GLint supported_readformat = 0;
+
     _glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_FORMAT, &supported_readformat);
+    if (readTexFormat == supported_readformat)    ret = true;
+
+restore:
     _glBindBuffer(GL_PIXEL_PACK_BUFFER, prev_pixelPackBuffer);
     _glBindFramebuffer(GL_READ_FRAMEBUFFER, prev_fbo);
     _glReadBuffer(prev_readBuff);
     _glDeleteFramebuffers(1, &fbo);
     _glGetError();
-    if (readTexFormat != supported_readformat) return false;
-    gRemovedTexFunc++;
-    return true;
+
+    DBG_LOG("%s \"%s\". internalFmt 0x%x, readTexFormat 0x%x, supported_readFormat 0x%x. \n", ret?"Remove":"Don't remove", "glTexSubImage", texInfo.mInternalFormat, readTexFormat, supported_readformat);
+    if(ret) gRemovedTexFunc++;
+    return ret;
 }
 
 static void saveData(common::OutFile &out, unsigned int flags, unsigned int repeat, Json::Value& ffJson, GLint dpy, GLint surface)
@@ -3447,34 +3640,38 @@ static void replay_thread(common::OutFile &out, const int threadidx, const int o
         // so it's important that we copy the call before actually calling the function.
         if (true)
         {
-            bool shouldSkip = (strstr(funcName, "SwapBuffers"))
-                || (strstr(funcName, "glDraw") && strcmp(funcName, "glDrawBuffers") != 0) // By excluding glDrawBuffers, glDraw* matches all drawing funcs.
-                || (strstr(funcName, "glDispatchCompute")) // Matches glDispatchCompute*
-                || (strstr(funcName, "glClearBuffer")) // Matches glClearBuffer*
-                || (strcmp(funcName, "glBlitFramebuffer") == 0) // NOTE: strCMP == 0
-                || (strcmp(funcName, "eglSetDamageRegionKHR") == 0)  // NOTE: strCMP == 0
-                || (strcmp(funcName, "glClear") == 0) // NOTE: strCMP == 0
-                || (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_TEXTURE && strcmp(funcName, "glBufferSubData") == 0)
-                || (strstr(funcName, "glTexSubImage")?checkTexSubImage():false);
-
-            if (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_TEXTURE || ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_SHADER) shouldSkip |= checkUnusedTexture(ffOptions.mFlags);
-
-            if (isFrameTarget)
+            bool shouldSkip = false;
+            if (!arriveTarget)
             {
-                arriveTarget = (retracer.GetCurFrameId() >= ffOptions.mTargetFrame);
-                if (strstr(funcName, "SwapBuffers") && (retracer.GetCurFrameId() + 1 == ffOptions.mTargetFrame))
+                shouldSkip = (strstr(funcName, "SwapBuffers"))
+                    || (strstr(funcName, "glDraw") && strcmp(funcName, "glDrawBuffers") != 0) // By excluding glDrawBuffers, glDraw* matches all drawing funcs.
+                    || (strstr(funcName, "glDispatchCompute")) // Matches glDispatchCompute*
+                    || (strstr(funcName, "glClearBuffer")) // Matches glClearBuffer*
+                    || (strcmp(funcName, "glBlitFramebuffer") == 0) // NOTE: strCMP == 0
+                    || (strcmp(funcName, "eglSetDamageRegionKHR") == 0)  // NOTE: strCMP == 0
+                    || (strcmp(funcName, "glClear") == 0) // NOTE: strCMP == 0
+                    || ( (ffOptions.mFlags & FASTFORWARD_REMOVE_BUF_SUBDATA)  && strcmp(funcName, "glBufferSubData") == 0 && checkBufferSubData() )
+                    || ( (ffOptions.mFlags & FASTFORWARD_REMOVE_BUF_MAP) && (strstr(funcName, "glMapBuffer") || strstr(funcName, "glUnmapBuffer") || strcmp(funcName, "glCopyClientSideBuffer")==0) )
+                    || ( (ffOptions.mFlags & FASTFORWARD_REMOVE_TEXTURE_SUBIMAGE) && strstr(funcName, "glTexSubImage")?checkTexSubImage():false);
+
+                if ( (ffOptions.mFlags >> OPTIMIZE_BIT) != 0 ) shouldSkip |= checkUnusedTexture(ffOptions.mFlags);
+
+                if (isFrameTarget)
                 {
-                    // We save the call before the call is executed, and GetCurFrameId() isn't
-                    // updated until the call (SwapBuffers) is made. This handles the case where this
-                    // is the last swap before the target frame, so that it isn't wrongly skipped.
-                    // (I.e., this swap marks the start of the target frame -- or equivalently, the end
-                    // of frame 0.)
-                    arriveTarget = true;
+                    arriveTarget = (retracer.GetCurFrameId() >= ffOptions.mTargetFrame);
+                    if (strstr(funcName, "SwapBuffers") && (retracer.GetCurFrameId() + 1 == ffOptions.mTargetFrame))
+                    {
+                        // We save the call before the call is executed, and GetCurFrameId() isn't
+                        // updated until the call (SwapBuffers) is made. This handles the case where this
+                        // is the last swap before the target frame, so that it isn't wrongly skipped.
+                        // (I.e., this swap marks the start of the target frame -- or equivalently, the end
+                        // of frame 0.)
+                        arriveTarget = true;
+                    }
+                } else
+                {
+                    arriveTarget = (curDrawCallNo >= ffOptions.mTargetDrawCallNo);
                 }
-            }
-            else
-            {
-                arriveTarget = (curDrawCallNo >= ffOptions.mTargetDrawCallNo);
             }
 
             // Until the target frame, output everything but skipped calls. After that, output everything.
@@ -3486,7 +3683,8 @@ static void replay_thread(common::OutFile &out, const int threadidx, const int o
                 common::BCall_vlen outBCall = retracer.mCurCall;
                 outBCall.funcId = newId;
 
-                if (outBCall.toNext == 0)
+                unsigned int callLen = common::gApiInfo.IdToLenArr[newId];
+                if (callLen != 0)
                 {
                     // It's really a BCall-struct, so only copy the BCall part of it
                     buffer.resizeToFit(sizeof(common::BCall) + common::gApiInfo.IdToLenArr[newId]);
@@ -3629,11 +3827,26 @@ usage(const char *argv0)
         "  --norestoretex When generating a fastforward trace, don't inject commands to restore the contents of textures to what the would've been when retracing the original. (NOTE: NOT RECOMMEND)\n"
         "  --version Output the version of this program\n"
         "  --restorefbo0 <repeat_times> Repeat to inject a draw call commands and swapbuffer the given number of times to restore the last default FBO. Suggest repeating 3~4 times if setDamageRegionKHR, else repeating 1 time.\n"
-        "  --txu Remove the unused textures,buffers and related function calls.\n"
-        "  --shu Remove the unused shaders and related function calls.\n"
         "  --restartframenum Set the flag restartFrameNumbering to true.\n"
+        "  \n"
+        "  Following options aim to fastforward optimization. Set to 1 (true) by default.\n"
+        "  --removeUnusedShader <1 or 0> Remove the unused shader and program related calls.\n"
+        "  --removeUnusedMipmap <1 or 0> Remove the unused mipmap generation calls.\n"
+        "  --removeUnusedBuffer <1 or 0> Remove the unused buffer related calls.\n"
+        "  --norestoreUnusedBuffer <1 or 0> Don't inject commands to restore the data for unused buffers.\n"
+        "  --removeBufferSubData   <1 or 0> Remove all the BufferSubData except the unable saved buffers.\n"
         "\n"
         , argv0);
+
+    // Render issues still exist with following optimization. It isn't set to TRUE by default and aims to debug internally.
+    // Hide the information in help.
+#if 0
+        "  --removeUnusedtex <1 or 0> Remove the unused texture related calls.\n"
+        "  --removeBufferMap <1 or 0> Remove all the buffer map/unmap related calls except the unsaved buffers.\n"
+        "  --removeCopyImage <1 or 0> Remove all the CopyImageSubData calls excpet the unable saved textures.\n"
+        "  --removeTexSubImage <1 or 0> Remove all the TexSubImage calls except the unable saved textures.\n"
+        "  --norestoreUnusedtex <1 or 0> Don't inject commands to restore the contents of unsued textures.\n"
+#endif
 }
 
 static int readValidValue(const char* v)
@@ -3664,6 +3877,7 @@ static bool ParseCommandLine(int argc, char** argv, FastForwardOptions& ffOption
     bool gotInput = false;
     bool gotTargetFrame = false;
     bool gotTargetDrawCallNo = false;
+    int  enable = 0;
 
     // Parse all except first (executable name)
     for (int i = 1; i < argc; ++i)
@@ -3736,13 +3950,85 @@ static bool ParseCommandLine(int argc, char** argv, FastForwardOptions& ffOption
             std::cout << "- Fastforwarder: " << PATRACE_VERSION << std::endl;
             exit(0);
         }
-        else if (!strcmp(arg, "--txu"))
+        else if (!strcmp(arg, "--removeUnusedShader"))
         {
-            ffOptions.mFlags |= FASTFORWARD_REMOVE_UNUSED_TEXTURE;
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_REMOVE_UNUSED_SHADER;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_REMOVE_UNUSED_SHADER;
         }
-        else if (!strcmp(arg, "--shu"))
+        else if (!strcmp(arg, "--removeUnusedMipmap"))
         {
-            ffOptions.mFlags |= FASTFORWARD_REMOVE_UNUSED_SHADER;
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_REMOVE_UNUSED_MIPMAP;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_REMOVE_UNUSED_MIPMAP;
+        }
+        else if (!strcmp(arg, "--removeUnusedBuffer"))
+        {
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_REMOVE_UNUSED_BUFFER;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_REMOVE_UNUSED_BUFFER;
+        }
+        else if (!strcmp(arg, "--norestoreUnusedBuffer"))
+        {
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_NO_RESTORE_UNUSED_BUFFER;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_NO_RESTORE_UNUSED_BUFFER;
+        }
+        else if (!strcmp(arg, "--removeBufferSubData"))
+        {
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_REMOVE_BUF_SUBDATA;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_REMOVE_BUF_SUBDATA;
+        }
+        else if (!strcmp(arg, "--removeUnusedtex"))
+        {
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_REMOVE_UNUSED_TEXTURE;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_REMOVE_UNUSED_TEXTURE;
+        }
+        else if (!strcmp(arg, "--norestoreUnusedtex"))
+        {
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_NO_RESTORE_UNUSED_TEXTURE;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_NO_RESTORE_UNUSED_TEXTURE;
+        }
+        else if (!strcmp(arg, "--removeTexSubImage"))
+        {
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_REMOVE_TEXTURE_SUBIMAGE;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_REMOVE_TEXTURE_SUBIMAGE;
+        }
+        else if (!strcmp(arg, "--removeCopyImage"))
+        {
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_REMOVE_COPY_IMG_SUBDATA;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_REMOVE_COPY_IMG_SUBDATA;
+        }
+        else if (!strcmp(arg, "--removeBufferMap"))
+        {
+            enable = readValidValue(argv[++i]);
+            if (enable)
+                ffOptions.mFlags |= FASTFORWARD_REMOVE_BUF_MAP;
+            else
+                ffOptions.mFlags &= ~FASTFORWARD_REMOVE_BUF_MAP;
         }
         else if(!strcmp(arg, "--restartframenum"))
         {
@@ -3788,6 +4074,9 @@ extern "C"
 int main(int argc, char** argv)
 {
     FastForwardOptions ffOptions;
+    ffOptions.mFlags |= FASTFORWARD_REMOVE_UNUSED_SHADER | FASTFORWARD_REMOVE_UNUSED_MIPMAP | FASTFORWARD_REMOVE_UNUSED_BUFFER 
+                       | FASTFORWARD_NO_RESTORE_UNUSED_BUFFER | FASTFORWARD_REMOVE_BUF_SUBDATA;
+
     if (!ParseCommandLine(argc, argv, /*out*/ ffOptions, gRetracer.mOptions))
     {
         return 1;
@@ -3804,8 +4093,9 @@ int main(int argc, char** argv)
     common::gApiInfo.RegisterEntries(gles_callbacks);
     common::gApiInfo.RegisterEntries(egl_callbacks);
 
-    if (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_TEXTURE || ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_SHADER)
+    if ( (ffOptions.mFlags >> OPTIMIZE_BIT) != 0 )
     {
+        DBG_LOG("Enabled optimization options: 0x%x .\n", ffOptions.mFlags);
         // Initialize texture usage parser
         ParseInterfaceRetracing parser;
         if (!parser.open(gRetracer.mOptions.mFileName))
@@ -3817,7 +4107,7 @@ int main(int argc, char** argv)
         parser.ff_endframe = (ffOptions.mEndFrame > INT32_MAX) ? INT32_MAX : ffOptions.mEndFrame; // incase mEndFrame(uint) is out of int range
 
         parser.loop([](ParseInterfaceBase& input, common::CallTM *call, void *data) {return (input.frames <= input.ff_endframe);}, nullptr);
-        parser.outputTexUsage(gUnusedMipgen, map_unusedTexture, map_unusedBuffer, map_unusedShader);
+        parser.outputTexUsage(gUnusedMipgen, map_unusedTexture, map_unusedBuffer, map_unusedShader, map_unusedProgram);
         std::string fileName = gRetracer.mOptions.mFileName;
         parser.cleanup();
         gRetracer.~Retracer();
@@ -3886,10 +4176,21 @@ int main(int argc, char** argv)
     // Do fastforwarding: pass ffJson in case we want to add anything
     retraceAndTrim(out, ffOptions, ffJson);
 
-    if (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_TEXTURE)
-        DBG_LOG("%d mipmap generation calls are removed, %d textures are removed, %d texture calls are removed, %d buffers are removed.\n", gRemovedMipgen, gRemovedTexture, gRemovedTexFunc, gRemovedBuffer);
-    if (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_SHADER)
-        DBG_LOG("%d shader calls are removed.\n", gRemovedShaderFunc);
+    if (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_MIPMAP)
+        DBG_LOG("%d unused mipmap generation calls are removed.\n", gRemovedMipgen);
+    if (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_TEXTURE || ffOptions.mFlags&FASTFORWARD_REMOVE_TEXTURE_SUBIMAGE)
+        DBG_LOG("%d unused texture calls are removed.\n", gRemovedTexFunc);
+    if (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_SHADER) {
+        DBG_LOG("%d unused shader calls are removed.\n", gRemovedShaderFunc);
+        DBG_LOG("%d unused program calls are removed.\n", gRemovedProgramFunc);
+    }
+    if (ffOptions.mFlags & FASTFORWARD_REMOVE_UNUSED_BUFFER)
+        DBG_LOG("%d unused buffer calls are removed.\n", gRemovedBufferFunc);
+    if (ffOptions.mFlags & FASTFORWARD_NO_RESTORE_UNUSED_BUFFER)
+        DBG_LOG("%d unused buffers are not restored.\n", gUnsavedBuffer);
+    if (ffOptions.mFlags & FASTFORWARD_NO_RESTORE_UNUSED_TEXTURE)
+        DBG_LOG("%d unused textures are not restored.\n", gUnsavedTexture);
+
     // Add our conversion to the list
     addConversionEntry(jsonRoot, "fastforward", gRetracer.mOptions.mFileName, ffJson);
 

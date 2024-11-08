@@ -14,35 +14,15 @@ from build_all import (
 script_dir = os.path.dirname(os.path.realpath(__file__))
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Build content capturing projects',
-        usage="Usage: %(prog)s [options]\nExample: %(prog)s --build-dir /work/mybuild/debug --install-dir /work/mybuild/bin patrace fbdev_arm debug --static true",
-        epilog="see build_all.py for building every target including Android"
-    )
-    parser.add_argument('project',
-                        help='the only valid value is \'patrace\'')
-    parser.add_argument('--build-dir', default='',
-                        help='path to build directory. Defaults to \'builds\' in the top level project directory.')
-    parser.add_argument('--install-dir', default='',
-                        help='path to install directory. When relative, it is relative to the build directory. Defaults to \'install\' in the top level project directory.')
-    parser.add_argument(
-        'platform', default='x11_x64',
-        help="window system and architecture separated with an underscore. Possible values: {platforms}. These are are defined in patrace/project/cmake/toolchains".format(
-            platforms=', '.join(all_platforms)
-        )
-    )
-    parser.add_argument('type', default='debug',
-                        help='the build type. Possible values: debug, release, sanitizer')
-
-    parser.add_argument('--ffi7', type=bool, default=False,
-                        help='build wayland_aarch64 with libffi.7.so. Default to build with libffi.6.so')
-
-    parser.add_argument('--ffi8', type=bool, default=False,
-                        help='build wayland_aarch64 with libffi.8.so. Default to build with libffi.6.so')
-
-    parser.add_argument('--static', type=bool, default=False,
-                        help='build patrace statically. Defaults to \'false\'')
-
+    parser = argparse.ArgumentParser(description='Build patrace')
+    parser.add_argument('project', default='patrace', choices=['patrace'], help='the only valid value is \'patrace\'')
+    parser.add_argument('platform', default='x11_x64', choices=all_platforms, help="window system and architecture separated with an underscore, defined in patrace/project/cmake/toolchains")
+    parser.add_argument('type', default='debug', choices=['debug', 'release', 'sanitizer'], help='the build type')
+    parser.add_argument('--build-dir', default='', help='path to build directory. Defaults to \'builds\' in the top level project directory.')
+    parser.add_argument('--install-dir', default='', help='path to install directory. When relative, it is relative to the build directory. Defaults to \'install\' in the top level project directory.')
+    parser.add_argument('--ffi7', type=bool, default=False, help='build wayland_aarch64 with libffi.7.so. Default to build with libffi.6.so')
+    parser.add_argument('--ffi8', type=bool, default=False, help='build wayland_aarch64 with libffi.8.so. Default to build with libffi.6.so')
+    parser.add_argument('--static', type=bool, default=False, help='build patrace statically. Defaults to \'false\'')
     args = parser.parse_args()
 
     exclude = ['android', 'fbdev_x32', 'fbdev_x64', 'rhe6_x32', 'rhe6_x64']

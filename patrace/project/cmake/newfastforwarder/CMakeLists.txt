@@ -29,11 +29,11 @@ target_link_libraries(newfastforwarder
     ${LIBRARY_NEWFASTFORWARDER_SYSTEM}
     jsoncpp
 )
-set_target_properties(newfastforwarder PROPERTIES LINK_FLAGS "-pthread" COMPILE_FLAGS "-pthread")
+set_target_properties(newfastforwarder PROPERTIES LINK_FLAGS "-pthread -z max-page-size=16384" COMPILE_FLAGS "-pthread")
 add_dependencies(newfastforwarder
     retrace_gles_auto_src_generation
     eglproc_auto_src_generation
     glxml_header
 )
 
-install(TARGETS newfastforwarder RUNTIME DESTINATION bin)
+install(TARGETS newfastforwarder RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

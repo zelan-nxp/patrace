@@ -199,7 +199,7 @@ common::CallTM* ParseInterface::next_call()
         return nullptr;
     }
     delete mCall;
-    mCall = new common::CallTM(inputFile, mCallNo, call);
+    mCall = new common::CallTM(inputFile, inputFile.curCallNo, call);
     if (current_context.count(mCall->mTid) > 0)
     {
         context_index = current_context[mCall->mTid];
@@ -209,8 +209,7 @@ common::CallTM* ParseInterface::next_call()
     {
         interpret_call(mCall);
     }
-    mCallNo++;
-    current_pos.call = mCallNo;
+    current_pos.call = inputFile.curCallNo;
     return mCall;
 }
 
@@ -1585,6 +1584,13 @@ void ParseInterfaceBase::interpret_call(common::CallTM *call)
                                         contexts[context_index].framebuffers.remap(contexts[context_index].drawframebuffer), false, id);
                 unbind_renderbuffers_if(contexts[context_index],
                                         contexts[context_index].framebuffers.remap(contexts[context_index].readframebuffer), false, id);
+                for (auto pair = contexts[context_index].image_binding.begin(); pair != contexts[context_index].image_binding.end();)
+                {
+                    if (pair->second == id)
+                        pair = contexts[context_index].image_binding.erase(pair);
+                    else
+                        ++pair;
+                }
             }
         }
     }
@@ -1882,6 +1888,7 @@ void ParseInterfaceBase::interpret_call(common::CallTM *call)
                 if (frames >= ff_startframe && frames <= ff_endframe)
                 {
                     StateTracker::Program& p = contexts[context_index].programs[program_index];
+                    p.used = true;
                     for (const auto it : p.shaders)
                     {
                         StateTracker::Shader &shader = contexts[context_index].shaders[it.second];
@@ -1967,6 +1974,7 @@ void ParseInterfaceBase::interpret_call(common::CallTM *call)
         }
         if (frames >= ff_startframe && frames <= ff_endframe)
         {
+            p.used = true;
             for (const auto it : p.shaders)
             {
                 StateTracker::Shader &shader = contexts[context_index].shaders[it.second];
@@ -2279,6 +2287,7 @@ void ParseInterfaceBase::interpret_call(common::CallTM *call)
             StateTracker::Program& p = contexts[context_index].programs[program_index];
             if (frames >= ff_startframe && frames <= ff_endframe)
             {
+                p.used = true;
                 for (const auto it : p.shaders)
                 {
                     StateTracker::Shader &shader = contexts[context_index].shaders[it.second];
@@ -2464,6 +2473,11 @@ void ParseInterfaceBase::interpret_call(common::CallTM *call)
         const int current_program = contexts[context_index].program_index;
         contexts[context_index].programs[current_program].stats.dispatches++;
         contexts[context_index].programs[current_program].stats_per_frame[frames].dispatches++;
+        if (frames >= ff_startframe && frames <= ff_endframe)
+        {
+            StateTracker::Program& p = contexts[context_index].programs[current_program];
+            p.used = true;
+        }
         StateTracker::RenderPass &rp = contexts[context_index].render_passes.back();
         rp.active = true;
         rp.used_programs.insert(current_program);
@@ -2752,15 +2766,7 @@ void ParseInterfaceBase::interpret_call(common::CallTM *call)
         rp.active = true;
         rp.drawframebuffer = contexts[context_index].drawframebuffer;
         rp.last_call = call->mCallNo;
-        std::unordered_map<GLenum, int> program_stages; // to handle both single program and program pipelines with same code
-        if (contexts[context_index].program_index != UNBOUND)
-        {
-            program_stages[0] = contexts[context_index].program_index;
-        }
-        else
-        {
-            program_stages = contexts[context_index].program_pipelines.at(contexts[context_index].program_pipeline_index).program_stages;
-        }
+        std::unordered_map<GLenum, int> program_stages = contexts[context_index].program_stages();
         const int fb_index = contexts[context_index].framebuffers.remap(contexts[context_index].drawframebuffer);
         contexts[context_index].framebuffers[fb_index].used++;
         // resuse does happen in the NBA games... need to handle this somehow
@@ -2897,6 +2903,10 @@ void ParseInterfaceBase::interpret_call(common::CallTM *call)
             program_idx = contexts[context_index].program_pipelines.at(contexts[context_index].program_pipeline_index).program_stages.at(GL_FRAGMENT_SHADER);
         }
         StateTracker::Program& p = contexts[context_index].programs.at(program_idx);
+        if (frames >= ff_startframe && frames <= ff_endframe)
+        {
+            p.used = true;
+        }
         for (auto& unitpair : contexts[context_index].textureUnits)
         {
             const GLenum unit = unitpair.first;

@@ -33,5 +33,6 @@ target_link_libraries (pat_editor
     ${SNAPPY_LIBRARIES}
     jsoncpp
 )
+set_target_properties(pat_editor PROPERTIES LINK_FLAGS "-pthread -z max-page-size=16384")
 add_dependencies (pat_editor call_parser_src_generation)
 install (TARGETS pat_editor DESTINATION tools)

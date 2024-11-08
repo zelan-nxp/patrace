@@ -105,7 +105,7 @@ static MyEGLAttribArray GetBestConfigPerThread()
         int highestCnt = 0;
 
         // Find  most used for cfgId for this tid
-        for (auto it : timesEGLConfigIdUsed[tid])
+        for (const auto& it : timesEGLConfigIdUsed[tid])
         {
             if (it.second > highestCnt)
             {
@@ -408,16 +408,6 @@ std::string BinAndMeta::getFileName() const
     return traceFile->getFileName();
 }
 
-TraceOut::TraceOut() : writebuf(new char[WRITE_BUF_LEN])
-{
-}
-
-TraceOut::~TraceOut()
-{
-    Close();
-    delete [] writebuf;
-}
-
 unsigned char GetThreadId()
 {
     if (thread_id == -1)
@@ -709,17 +699,15 @@ void pre_glUnmapBuffer(GLenum target)
             if (!hasPatch)
             {
                 bool created = false;
-                ClientSideBufferObjectName name = _getOrCreateClientSideBuffer(data.base, data.length, created);
 
-                if (created)
+                if(!(data.access & GL_MAP_FLUSH_EXPLICIT_BIT))
                 {
-                    // Store data for newly created CSB
-                    _glClientSideBufferData(name, data.length, data.base);
-                    _glCopyClientSideBuffer(target, name);
-                }
-                else if (_isClientSideBufferModified(name) || !(data.access & GL_MAP_FLUSH_EXPLICIT_BIT))
-                //only remove CopyCSB when glFlushMappedBufferRange is called and flushed the same range in this map
-                {
+                    ClientSideBufferObjectName name = _getOrCreateClientSideBuffer(data.base, data.length, created);
+                    if (created)
+                    {
+                        // Store data for newly created CSB
+                        _glClientSideBufferData(name, data.length, data.base);
+                    }
                     _glCopyClientSideBuffer(target, name);
                 }
             }
@@ -1232,7 +1220,7 @@ void pre_eglSwapBuffers()
 
 void insert_glBindTexture(GLenum target, GLuint texture, int tid)
 {
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall *pCall = (BCall*)dest;
     pCall->funcId = glBindTexture_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1247,7 +1235,7 @@ void insert_glBindTexture(GLenum target, GLuint texture, int tid)
 
 void insert_glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid * pixels, int tid)
 {
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall2 = (BCall_vlen*)dest;
     pCall2->funcId = glTexImage2D_id;
     pCall2->tid = tid; pCall2->reserved = 0; pCall2->source = 1;
@@ -1264,8 +1252,7 @@ void insert_glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsiz
     dest = WriteFixed<unsigned int>(dest, BlobType);
     dest = Write1DArray<char>(dest, (unsigned int)_glTexImage2D_size(format, type, width, height), (const char*)pixels);
     pCall2->errNo = GetCallErrorNo("glTexImage2D", tid);
-    pCall2->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->WriteBuf(dest);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 
@@ -1501,7 +1488,7 @@ void _glVertexPointer_fake(GLint size, GLenum type, GLsizei stride, const GLvoid
 {
     unsigned char tid = GetThreadId();
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glVertexPointer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1514,8 +1501,7 @@ void _glVertexPointer_fake(GLint size, GLenum type, GLsizei stride, const GLvoid
     dest = WriteFixed<unsigned int>(dest, 1); // IS *BLOB*
     dest = Write1DArray<char>(dest, _size, (char*)pointer); // opaque -> blob
     pCall->errNo = GetCallErrorNo("glVertexPointer", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 
@@ -1523,7 +1509,7 @@ void _glNormalPointer_fake(GLenum type, GLsizei stride, const GLvoid * pointer, 
 {
     unsigned char tid = GetThreadId();
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glNormalPointer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1535,8 +1521,7 @@ void _glNormalPointer_fake(GLenum type, GLsizei stride, const GLvoid * pointer, 
     dest = WriteFixed<unsigned int>(dest, 1); // IS *BLOB*
     dest = Write1DArray<char>(dest, _size, (char*)pointer); // opaque -> blob
     pCall->errNo = GetCallErrorNo("glNormalPointer", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 
@@ -1544,7 +1529,7 @@ void _glColorPointer_fake(GLint size, GLenum type, GLsizei stride, const GLvoid 
 {
     unsigned char tid = GetThreadId();
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glColorPointer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1557,15 +1542,14 @@ void _glColorPointer_fake(GLint size, GLenum type, GLsizei stride, const GLvoid 
     dest = WriteFixed<unsigned int>(dest, 1); // IS *BLOB*
     dest = Write1DArray<char>(dest, _size, (char*)pointer); // opaque -> blob
     pCall->errNo = GetCallErrorNo("glColorPointer", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 
 void _glTexCoordPointer_fake(GLint size, GLenum type, GLsizei stride, const GLvoid * pointer, unsigned int _size){
     unsigned char tid = GetThreadId();
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glTexCoordPointer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1578,8 +1562,7 @@ void _glTexCoordPointer_fake(GLint size, GLenum type, GLsizei stride, const GLvo
     dest = WriteFixed<unsigned int>(dest, 1); // IS *BLOB*
     dest = Write1DArray<char>(dest, _size, (char*)pointer); // opaque -> blob
     pCall->errNo = GetCallErrorNo("glTexCoordPointer", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 
@@ -1588,7 +1571,7 @@ void _glVertexAttribPointer_fake(const VertexAttributeMemoryMerger::AttributeInf
 {
     unsigned char tid = GetThreadId();
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glVertexAttribPointer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1604,8 +1587,7 @@ void _glVertexAttribPointer_fake(const VertexAttributeMemoryMerger::AttributeInf
     dest = WriteFixed<unsigned int>(dest, (unsigned int)(name));
     dest = WriteFixed<unsigned int>(dest, (unsigned int)(ai->offset));
     pCall->errNo = GetCallErrorNo("glVertexAttribPointer", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 #else
@@ -1614,7 +1596,7 @@ void _glVertexAttribPointer_fake(GLuint index, GLint size, GLenum type, GLboolea
 {
     unsigned char tid = GetThreadId();
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glVertexAttribPointer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1628,8 +1610,7 @@ void _glVertexAttribPointer_fake(GLuint index, GLint size, GLenum type, GLboolea
     dest = WriteFixed<int>(dest, stride); // literal
     dest = Write1DArray<char>(dest, (unsigned int)_size, (const char*)pointer); // blob
     pCall->errNo = GetCallErrorNo("glVertexAttribPointer", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 #endif
@@ -1637,7 +1618,7 @@ void _glVertexAttribPointer_fake(GLuint index, GLint size, GLenum type, GLboolea
 void _glClientActiveTexture_fake(GLenum texture){
     unsigned char tid = GetThreadId();
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall *pCall = (BCall*)dest;
     pCall->funcId = glClientActiveTexture_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1646,7 +1627,7 @@ void _glClientActiveTexture_fake(GLenum texture){
     // _glClientActiveTexture(texture);
     dest = WriteFixed<int>(dest, texture); // enum
     pCall->errNo = GetCallErrorNo("glClientActiveTexture", tid);
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteBuf(dest);
     gTraceOut->callNo++;
 }
 
@@ -1658,7 +1639,7 @@ ClientSideBufferObjectName _glCreateClientSideBuffer()
     const ClientSideBufferObjectName name = gTraceOut->mCSBufferSet.create_object(tid);
 
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall *pCall = (BCall*)dest;
     pCall->funcId = glCreateClientSideBuffer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1666,7 +1647,7 @@ ClientSideBufferObjectName _glCreateClientSideBuffer()
 
     dest = WriteFixed<unsigned int>(dest, name); // literal
     pCall->errNo = GetCallErrorNo("glCreateClientSideBuffer", tid);
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteBuf(dest);
     gTraceOut->callNo++;
     return name;
 }
@@ -1677,7 +1658,7 @@ void _glDeleteClientSideBuffer(ClientSideBufferObjectName name)
     gTraceOut->mCSBufferSet.delete_object(tid, name);
 
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall *pCall = (BCall*)dest;
     pCall->funcId = glDeleteClientSideBuffer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1685,7 +1666,7 @@ void _glDeleteClientSideBuffer(ClientSideBufferObjectName name)
 
     dest = WriteFixed<unsigned int>(dest, name); // literal
     pCall->errNo = GetCallErrorNo("glDeleteClientSideBuffer", tid);
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteBuf(dest);
     gTraceOut->callNo++;
 }
 
@@ -1694,7 +1675,7 @@ void _glCopyClientSideBuffer(GLenum target, ClientSideBufferObjectName name)
     const unsigned char tid = GetThreadId();
 
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall *pCall = (BCall*)dest;
     pCall->funcId = glCopyClientSideBuffer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1703,7 +1684,7 @@ void _glCopyClientSideBuffer(GLenum target, ClientSideBufferObjectName name)
     dest = WriteFixed<int>(dest, target); // enum
     dest = WriteFixed<unsigned int>(dest, name); // literal
     pCall->errNo = GetCallErrorNo("glCopyClientSideBuffer", tid);
-    gTraceOut->Write(gTraceOut->writebuf, dest - gTraceOut->writebuf);
+    gTraceOut->WriteBuf(dest);
     gTraceOut->callNo++;
 
     gTraceOut->mCSBufferSet.get_object(tid, name)->save_md5_last_copy();
@@ -1714,7 +1695,7 @@ void _glPatchClientSideBuffer(GLenum target, int length, const void *data)
     const unsigned char tid = GetThreadId();
 
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glPatchClientSideBuffer_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1724,8 +1705,7 @@ void _glPatchClientSideBuffer(GLenum target, int length, const void *data)
     dest = WriteFixed<int>(dest, length); // literal
     dest = Write1DArray<GLubyte>(dest, (unsigned int)(length), (const GLubyte *)(data)); // array
     pCall->errNo = GetCallErrorNo("glPatchClientSideBuffer", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest - gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 
@@ -1736,7 +1716,7 @@ void _glClientSideBufferData(ClientSideBufferObjectName name,
     gTraceOut->mCSBufferSet.object_data(tid, name, length, data);
 
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glClientSideBufferData_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1746,8 +1726,7 @@ void _glClientSideBufferData(ClientSideBufferObjectName name,
     dest = WriteFixed<int>(dest, length); // literal
     dest = Write1DArray<GLubyte>(dest, (unsigned int)(length), (const GLubyte *)(data)); // array
     pCall->errNo = GetCallErrorNo("glClientSideBufferData", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 
@@ -1758,7 +1737,7 @@ void _glClientSideBufferSubData(ClientSideBufferObjectName name,
     gTraceOut->mCSBufferSet.object_subdata(tid, name, offset, length, data);
 
     std::lock_guard<std::recursive_mutex> guard(gTraceOut->callMutex);
-    char* dest = gTraceOut->writebuf;
+    char* dest = gTraceOut->Start();
     BCall_vlen *pCall = (BCall_vlen*)dest;
     pCall->funcId = glClientSideBufferSubData_id;
     pCall->tid = tid; pCall->reserved = 0; pCall->source = 1;
@@ -1769,8 +1748,7 @@ void _glClientSideBufferSubData(ClientSideBufferObjectName name,
     dest = WriteFixed<int>(dest, length); // literal
     dest = Write1DArray<GLubyte>(dest, (unsigned int)(length), (const GLubyte *)(data)); // array
     pCall->errNo = GetCallErrorNo("glClientSideBufferSubData", tid);
-    pCall->toNext = dest-gTraceOut->writebuf;
-    gTraceOut->Write(gTraceOut->writebuf, dest-gTraceOut->writebuf);
+    gTraceOut->WriteVlen(dest);
     gTraceOut->callNo++;
 }
 

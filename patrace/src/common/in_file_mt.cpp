@@ -63,6 +63,54 @@ bool InFile::readChunk(std::vector<char> *buf)
     return false;
 }
 
+bool InFile::OpenPatchFile(const char* name)
+{
+    mPatchFd = open(name, O_RDONLY);
+    if (mPatchFd == -1)
+    {
+        DBG_LOG("Failed to open %s: %s\n", name, strerror(errno));
+        return false;
+    }
+    struct stat64 sb;
+    if (fstat64(mPatchFd, &sb) == -1)
+    {
+        DBG_LOG("Failed to stat %s: %s\n", name, strerror(errno));
+        close(mPatchFd);
+        return false;
+    }
+    mPatchSize = sb.st_size;
+    mPatchPtr = (char*)mmap(nullptr, mPatchSize, PROT_READ, MAP_PRIVATE, mPatchFd, 0);
+    madvise(mPatchPtr, mPatchSize, MADV_SEQUENTIAL);
+    uint32_t magic = *((uint32_t*)mPatchPtr);
+    if (magic != PATCHFILE_MAGIC_WORD)
+    {
+        DBG_LOG("Bad magic word in patch file!\n");
+        close(mPatchFd);
+        mPatchFd = -1;
+        return false;
+    }
+    mPatchPtr += 4; // skip magic number (4 bytes)
+    const uint32_t dictSize = *((uint32_t*)(mPatchPtr)); // get dictionary size
+    mPatchPtr += 4; // skip dictionary size
+    for (unsigned i = 0; i < dictSize; i++)
+    {
+        const char* name = mPatchPtr;
+        if (!name || !(*name)) { mPatchPtr++; continue; }
+        const uint32_t len = strlen(mPatchPtr); // null-terminated string
+        mPatchPtr += len + 1;
+        unsigned old_id = NameToExId(name);
+        if (old_id == 0) // new entry
+        {
+            mExIdToName.push_back(name);
+            mExIdToFunc.push_back(gApiInfo.NameToFptr(name));
+            mExIdToLen.push_back(gApiInfo.NameToLen(name));
+            mMaxSigId++;
+        }
+    }
+    mNextPatchCall = *((uint32_t*)(mPatchPtr)); // get first patch call id
+    return true;
+}
+
 bool InFile::Open(const char* name, bool readHeaderAndExit)
 {
     mFileName = name;
@@ -210,6 +258,7 @@ bool InFile::GetNextCall(void*& fptr, common::BCall_vlen& call, char*& src)
 {
     if (mFrameNo >= mEndFrame) return false; // we're done!
 
+skipcall:
     if (mPtr + sizeof(common::BCall) > mChunkEnd) // read more data?
     {
         if (mPreloadedChunks.size() > 0)
@@ -236,16 +285,42 @@ bool InFile::GetNextCall(void*& fptr, common::BCall_vlen& call, char*& src)
         mChunkEnd = mCurrentChunk->data() + mCurrentChunk->size();
     }
 
-    common::BCall tmp;
-    tmp = *(common::BCall*)mPtr;
-    if (unlikely(tmp.funcId > mMaxSigId || tmp.funcId == 0))
+    call = *(common::BCall*)mPtr;
+    if (unlikely(call.funcId > mMaxSigId || call.funcId == 0))
     {
-        DBG_LOG("funcId %d is out of range (%d max)!\n", (int)tmp.funcId, mMaxSigId);
+        DBG_LOG("funcId %d is out of range (%d max)!\n", (int)call.funcId, mMaxSigId);
         ::abort();
     }
 
-    const unsigned callLen = mExIdToLen[tmp.funcId];
-    if (callLen == 0)
+    unsigned callLen = mExIdToLen[call.funcId];
+    if (unlikely(mNextPatchCall == (unsigned)curCallNo + 1))
+    {
+        mPatchPtr += 4; // skip call number
+        const uint32_t patchsize = *((uint32_t*)mPatchPtr);
+        mPatchPtr += 4; // skip patch size
+        const uint32_t type = *((uint32_t*)mPatchPtr);
+        mPatchPtr += 4; // skip type
+        mNextPatchCall = *((uint32_t*)(mPatchPtr + patchsize)); // get next call id or terminator id
+        if (type == 0 || type == 1) // insert-before or replace
+        {
+            call = *(common::BCall*)mPatchPtr;
+            callLen = mExIdToLen[call.funcId];
+            if (callLen == 0) call.toNext = ((common::BCall_vlen*)mPatchPtr)->toNext; else call.toNext = callLen;
+            mDataPtr = src = mPatchPtr + ((callLen == 0) ? sizeof(common::BCall_vlen) : sizeof(common::BCall));
+        }
+        if (type == 1 || type == 2) // replace or remove, don't call the original call
+        {
+            if (callLen == 0) mPtr += ((common::BCall_vlen*)mPtr)->toNext; else mPtr += callLen;
+        }
+        mPatchPtr += patchsize;
+        if (type == 2) // remove, just increment and keep going
+        {
+            curCallNo++;
+            goto skipcall;
+        }
+        if (type == 0) curCallNo--; // don't allow the increment below to change the original call count; not perfect as we really want to prevent the _next_ increment
+    }
+    else if (callLen == 0)
     {
         // Call is in BCall_vlen format -- read it directly
         call = *(common::BCall_vlen*)mPtr;
@@ -254,15 +329,15 @@ bool InFile::GetNextCall(void*& fptr, common::BCall_vlen& call, char*& src)
     }
     else
     {
-        call = tmp;
         mDataPtr = src = mPtr + sizeof(common::BCall);
         mPtr += callLen;
+        call.toNext = callLen;
     }
 
     fptr = mExIdToFunc[call.funcId];
 
     // Count frames and check if we are done or need to start preloading
-    if ((tmp.tid == mTraceTid || mTraceTid == -1) && (tmp.funcId == eglSwapBuffers_id || call.funcId == eglSwapBuffersWithDamageKHR_id || call.funcId == eglSwapBuffersWithDamageEXT_id))
+    if ((call.tid == mTraceTid || mTraceTid == -1) && (call.funcId == eglSwapBuffers_id || call.funcId == eglSwapBuffersWithDamageKHR_id || call.funcId == eglSwapBuffersWithDamageEXT_id))
     {
         if (mPbufferSurfaces.count(getDpySurface(src))==0)
         {
@@ -276,12 +351,12 @@ bool InFile::GetNextCall(void*& fptr, common::BCall_vlen& call, char*& src)
         }
     }
 
-    if (tmp.funcId == eglCreatePbufferSurface_id)
+    if (call.funcId == eglCreatePbufferSurface_id)
     {
         mPbufferSurfaces.insert(getCreatePbufferSurfaceRet(src));
     }
 
-    if (tmp.funcId == eglDestroySurface_id)
+    if (call.funcId == eglDestroySurface_id)
     {
         mPbufferSurfaces.erase(getDpySurface(src));
     }
@@ -294,7 +369,10 @@ void InFile::Close()
 {
     if (!mIsOpen) return;
     munmap(mCompressedBuffer, mCompressedSize);
-    close(mFd); mFd = 0;
+    if (mFd != -1) close(mFd);
+    mFd = -1;
+    if (mPatchFd != -1) close(mPatchFd);
+    mPatchFd = -1;
     mIsOpen = false;
     mPreload = false;
     for (auto* b : mPreloadedChunks) delete b;
@@ -304,8 +382,8 @@ void InFile::Close()
     delete mCurrentChunk; mCurrentChunk = nullptr;
     delete mPrevChunk; mPrevChunk = nullptr;
     mExIdToName.clear();
-    delete [] mExIdToLen; mExIdToLen = nullptr;
-    delete [] mExIdToFunc; mExIdToFunc = nullptr;
+    mExIdToLen.clear();
+    mExIdToFunc.clear();
 }
 
 void InFile::ReadSigBook()
@@ -335,8 +413,8 @@ void InFile::ReadSigBook()
         }
     }
 
-    mExIdToLen = new int[mMaxSigId + 1];
-    mExIdToFunc = new void*[mMaxSigId + 1];
+    mExIdToLen.resize(mMaxSigId + 1);
+    mExIdToFunc.resize(mMaxSigId + 1);
 
     mExIdToLen[0] = 0;
     mExIdToFunc[0] = 0;

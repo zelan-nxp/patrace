@@ -22,5 +22,5 @@ target_link_libraries (egltrace
     ${ZLIB_LIBRARIES}
 )
 add_dependencies(egltrace eglproc_auto_src_generation glxml_header)
-set_target_properties(egltrace PROPERTIES LINK_FLAGS "-pthread" COMPILE_FLAGS "-pthread")
-install(TARGETS egltrace LIBRARY DESTINATION lib)
+set_target_properties(egltrace PROPERTIES LINK_FLAGS "-pthread -z max-page-size=16384" COMPILE_FLAGS "-pthread")
+install(TARGETS egltrace LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})

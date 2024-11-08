@@ -2,7 +2,7 @@
 // Print the dictionary
 //
 // To compile:
-// gcc -o print_dictionary patrace/src/tool/print_dictionary.cpp -Wall -g -O3 -I thirdparty/snappy -std=c++11 builds/patrace/x11_x64/debug/snappy/libsnappy_bundled.a -lstdc++ -I patrace/src
+// gcc -o print_dictionary patrace/src/tool/print_dictionary.cpp -Wall -g -O3 -I thirdparty/snappy -std=c++14 builds/patrace/x11_x64/debug/snappy/libsnappy_bundled.a -lstdc++ -I patrace/src
 //
 
 #include <assert.h>

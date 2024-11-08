@@ -49,6 +49,7 @@ broken_funcs = [ # these fail to compile and should be fixed
     'glDebugMessageCallback',
     'glGetDebugMessageLogKHR',
     'glGetDebugMessageLog',
+    'glGetTranslatedShaderSourceANGLE',
     'glGetFragmentShadingRatesEXT', # Out(Pointer(basic type)) broken
 
     # For the below: Their array of values is stupidly stored since the apitrace days as a pointer value. That
@@ -69,10 +70,6 @@ check_ret_funcs = [
     'glIsTexture', 'glIsRenderbufferOES', 'glIsFramebufferOES', 'glIsVertexArrayOES', 'glIsQueryEXT',
     'glIsProgramPipelineEXT', 'glGetFragDataLocation', 'glGetGraphicsResetStatus',
 ]
-
-notSupportedFuncs = set([
-    'glVertexAttrib1fv',
-])
 
 autogenBindFuncs = {
     'glBindBuffer': 'glGenBuffers',
@@ -340,6 +337,11 @@ class DeserializeVisitor(stdapi.Visitor):
             print('        %s = gRetracer.mCSBuffers.translate_address(gRetracer.getCurTid(), csbName, (ptrdiff_t)offset);' % (name))
             print('    } else if (_opaque_type == NoopType) { // Do nothing')
             print('    }')
+            if func.name in ['glObjectPtrLabelKHR', 'glObjectPtrLabel']:
+                    print('    Context& context = gRetracer.getCurrentContext();')
+                    print('    uint64_t ptr_sync = *((uint64_t*)%s);' % (name))
+                    print('    GLsync syncNew = context.getSyncMap().RValue(ptr_sync);')
+                    print('    %s = &syncNew;' % (name))
 
     def visitInterface(self, interface, arg, name, func):
         print('    #error')
@@ -594,15 +596,6 @@ class Retracer(object):
                 DeserializeVisitor().visit(arg.type, arg, arg.name, func)
         print()
         DeserializeVisitor().visit(func.type, None, 'old_ret', func)
-        if func.name == 'glAssertBuffer_ARM':
-            print('    const char *ptr = (const char *)glMapBufferRange(target, offset, size, GL_MAP_READ_BIT);')
-            print('    MD5Digest md5_bound_calc(ptr, size);')
-            print('    std::string md5_bound = md5_bound_calc.text();')
-            print('    if (md5_bound != md5) {')
-            print('        DBG_LOG("glAssertBuffer_ARM: MD5 sums differ!\\n");')
-            print('        abort();')
-            print('    }')
-            print('    glUnmapBuffer(target);')
 
     def outAllocate(self, func):
         print('    // ----------- out parameters  ------------')
@@ -673,7 +666,9 @@ class Retracer(object):
                          'glDeleteQueries',
                          'glDeleteSamplers',
                          'glDeleteVertexArrays',
-                         'glDeleteVertexArraysOES']:
+                         'glDeleteVertexArraysOES',
+                         'glAssertFramebuffer_ARM',
+                         'glAssertBuffer_ARM']:
             print('    // hardcode in retrace!')
             return
 
@@ -787,9 +782,6 @@ class Retracer(object):
         is_draw_elements = func.name in stdapi.draw_elements_function_names
         indent = ''
 
-        if func.name == 'glAssertBuffer_ARM':
-            return
-
         print('    // ------------- pre retrace ------------------')
         if func.name == 'glUseProgram':
             print('    gRetracer.mState.mThreadArr[gRetracer.getCurTid()].getContext()->_current_program = programNew;')
@@ -812,6 +804,12 @@ class Retracer(object):
         if func.name in ['glCopyImageSubDataEXT', 'glCopyImageSubData', 'glCopyImageSubDataOES']:
             print('    srcName = lookUpPolymorphic(srcName, srcTarget);')
             print('    dstName = lookUpPolymorphic(dstName, dstTarget);')
+        if func.name in ['glLabelObjectEXT', 'glGetObjectLabelEXT']:#glGetObjectLabel* is in broken funcs
+            print('    object = lookUpPolymorphic2(object, type);')
+        if func.name in ['glObjectLabel', 'glGetObjectLabel']:
+            print('    name = lookUpPolymorphic3(name, identifier);')
+        if func.name in ['glObjectLabelKHR', 'glGetObjectLabelKHR']:
+            print('    name = lookUpPolymorphic3(name, identifier);')
         if func.name == 'glStateDump_ARM':
             print('    gRetracer.getStateLogger().logState(gRetracer.getCurTid());')
             return
@@ -896,6 +894,12 @@ class Retracer(object):
             return
         if func.name in bind_framebuffer_function_names:
             print('    hardcode_glBindFramebuffer(target, framebufferNew);')
+            return
+        if func.name == 'glAssertBuffer_ARM':
+            print('    hardcode_glAssertBuffer_ARM(target, offset, size, md5);')
+            return
+        if func.name == 'glAssertFramebuffer_ARM':
+            print('    hardcode_glAssertFramebuffer_ARM(target, colorAttachment, md5);')
             return
         if func.name == 'glDeleteBuffers':
             print('    hardcode_glDeleteBuffers(n, buffers);')
@@ -1103,9 +1107,7 @@ class Retracer(object):
 
     def retraceFunction(self, func):
         print('PUBLIC void retrace_%s(char* _src) {' % func.name)
-        if func.name in notSupportedFuncs:
-            print('    DBG_LOG("%s is not supported\\n");' % func.name)
-        elif func.name in ignored_funcs:
+        if func.name in ignored_funcs:
             pass
         else:
             self.retraceFunctionBody(func)

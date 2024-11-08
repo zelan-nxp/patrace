@@ -289,10 +289,8 @@ void InFileRA::ReadSigBook()
         }
     }
 
-    if (mExIdToLen) delete [] mExIdToLen;
-    mExIdToLen = new int[mMaxSigId + 1];
-    if (mExIdToFunc) delete [] mExIdToFunc;
-    mExIdToFunc = new void*[mMaxSigId + 1];
+    mExIdToLen.resize(mMaxSigId + 1);
+    mExIdToFunc.resize(mMaxSigId + 1);
 
     mExIdToLen[0] = 0;
     mExIdToFunc[0] = 0;

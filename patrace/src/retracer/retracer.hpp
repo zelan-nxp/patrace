@@ -69,6 +69,8 @@ public:
     void OnFrameComplete();
     void OnNewFrame();
     void StartMeasuring();
+    void SaveBuffersMaps();
+    void LoadBuffersMaps();
 
     void TriggerScript(const char* scriptPath);
 
@@ -90,6 +92,8 @@ public:
     inline void IncCurFrameId() { mCurFrameNo++; frameBudget--; }
     inline Context& getCurrentContext() { return *mState.mThreadArr[getCurTid()].getContext(); }
     inline bool hasCurrentContext() const { return mState.mThreadArr[getCurTid()].getContext() != nullptr; }
+    inline int getLoopTimes() const { return mLoopTimes; }
+    std::vector<unsigned int> buffer_to_del;
 
     void DiscardFramebuffers();
     void PerfStart();
@@ -135,6 +139,9 @@ public:
     std::unordered_map<int, int> thread_remapping;
     std::atomic_int latest_call_tid;
     std::mutex mConditionMutex;
+
+    std::set<unsigned int> mBufferMapCheckpoint; // set of buffer names
+    common::ClientSideBufferObjectSet mCSBCheckpoint; // Copy of mCSBuffers
 
 private:
     bool loadRetraceOptionsByThreadId(int tid);
@@ -222,10 +229,14 @@ void hardcode_glDeleteTransformFeedbacks(int n, unsigned int* oldTransformFeedba
 void hardcode_glDeleteQueries(int n, unsigned int* oldQueries);
 void hardcode_glDeleteSamplers(int n, unsigned int* oldSamplers);
 void hardcode_glDeleteVertexArrays(int n, unsigned int* oldVertexArrays);
+void hardcode_glAssertBuffer_ARM(GLenum target, GLsizei offset, GLsizei size, const char* md5);
+void hardcode_glAssertFramebuffer_ARM(GLenum target, GLint colorAttachment, const char* md5);
 void forceRenderMosaicToScreen();
 
 GLuint lookUpPolymorphic(GLuint name, GLenum target);
-
+GLuint lookUpPolymorphic2(GLuint name, GLenum target);
+GLuint lookUpPolymorphic3(GLuint name, GLenum target);
+EGLObjectKHR lookUpPolymorphic4(int64_t object, EGLenum objectType);
 } /* namespace retracer */
 
 #endif /* _RETRACE_HPP_ */

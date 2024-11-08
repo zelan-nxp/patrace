@@ -1,6 +1,11 @@
 #include <errno.h>
 #include <stdio.h>
 
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 #include "tool/parse_interface.h"
 #include <common/api_info.hpp>
 #include <common/parse_api.hpp>
@@ -24,7 +29,7 @@ static bool bare = false;
 #define WHT   "\x1B[37m"
 #define RESET "\x1B[0m"
 
-void usage(const char *argv0)
+static void usage(const char *argv0)
 {
     DBG_LOG(
         "Usage: %s [OPTION] <path_to_trace_file> [outfile]\n"
@@ -37,11 +42,12 @@ void usage(const char *argv0)
         "  -v     Verbose output\n"
         "  -c     Add colours\n"
         "  -b     Bare mode (useful for making diffs between two output files)\n"
+        "  -p ARG Add a patch file\n"
         "\n"
         , argv0);
 }
 
-int readValidValue(const char* v)
+static int readValidValue(const char* v)
 {
     char* endptr;
     errno = 0;
@@ -56,6 +62,62 @@ int readValidValue(const char* v)
     }
 
     return val;
+}
+
+static bool try_patchfile(const char* filename, FILE* out)
+{
+    int fd = open(filename, O_RDONLY);
+    if (fd == -1)
+    {
+        DBG_LOG("Failed to open %s: %s\n", filename, strerror(errno));
+        exit(-1);
+    }
+    struct stat64 sb;
+    if (fstat64(fd, &sb) == -1)
+    {
+        DBG_LOG("Failed to stat %s: %s\n", filename, strerror(errno));
+        close(fd);
+        return false;
+    }
+    unsigned filesize = sb.st_size;
+    char* ptr = (char*)mmap(nullptr, filesize, PROT_READ, MAP_PRIVATE, fd, 0);
+    madvise(ptr, filesize, MADV_SEQUENTIAL);
+    uint32_t magic = *((uint32_t*)ptr);
+    if (magic != PATCHFILE_MAGIC_WORD)
+    {
+        munmap(ptr, filesize);
+        close(fd);
+        return false; // not a patch file
+    }
+    ptr += 4; // skip magic number (4 bytes)
+    const uint32_t dict_size = *((uint32_t*)(ptr));
+    ptr += 4; // skip dictionary size
+    for (unsigned i = 0; i < dict_size; i++) // skip entire dictionary
+    {
+        if (ptr) ptr += strlen(ptr);
+        ptr++;
+    }
+    uint32_t nextPatchCall = *((uint32_t*)(ptr));
+    while (nextPatchCall != UINT32_MAX)
+    {
+        ptr += 4; // skip call id
+        const uint32_t patchsize = *((uint32_t*)ptr);
+        ptr += 4; // skip patch size
+        const uint32_t flags = *((uint32_t*)ptr); // flags
+        ptr += 4; // skip flags
+        const char* type = "?";
+        if (flags == 0) type = "INSERT";
+        else if (flags == 1) type = "REPLACE";
+        else if (flags == 2) type = "REMOVE";
+        else assert(false);
+        fprintf(out, "%s call %u, patchsize %d\n", type, (unsigned)nextPatchCall, (int)patchsize);
+        nextPatchCall = *((uint32_t*)(ptr + patchsize)); // get next call id or terminator id
+        ptr += patchsize;
+    }
+    munmap(ptr, filesize);
+    close(fd);
+    fclose(out);
+    return true;
 }
 
 static bool callback(ParseInterfaceBase& input, common::CallTM *call, void *fpp)
@@ -173,6 +235,7 @@ int main(int argc, const char* argv[])
     }
     const char* filename = NULL;
     const char* out = NULL;
+    const char* patchfile = nullptr;
     for (int i = 1; i < argc; ++i)
     {
         const char *arg = argv[i];
@@ -203,6 +266,10 @@ int main(int argc, const char* argv[])
         {
             our_tid = readValidValue(argv[++i]);
         }
+        else if (!strcmp(arg, "-p"))
+        {
+            patchfile = argv[++i];
+        }
         else if (!strcmp(arg, "-c"))
         {
             colours = true;
@@ -231,12 +298,14 @@ int main(int argc, const char* argv[])
             return -1;
         }
     }
+    if (try_patchfile(filename, fp)) return 0;
     ParseInterface inputFile;
     if (!inputFile.open(filename))
     {
         std::cerr << "Failed to open for reading: " << filename << std::endl;
         return 1;
     }
+    if (patchfile && !inputFile.inputFile.OpenPatchFile(patchfile)) abort();
     common::CallTM *call = nullptr;
     while ((call = inputFile.next_call()) && callback(inputFile, call, fp)) {}
     fclose(fp);

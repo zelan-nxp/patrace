@@ -44,6 +44,6 @@ add_dependencies(drawstate
     retrace_gles_auto_src_generation
     eglproc_auto_src_generation
 )
-set_target_properties(drawstate PROPERTIES LINK_FLAGS "-pthread" COMPILE_FLAGS "-pthread")
+set_target_properties(drawstate PROPERTIES LINK_FLAGS "-pthread -z max-page-size=16384" COMPILE_FLAGS "-pthread")
 install(TARGETS drawstate
     RUNTIME DESTINATION bin)

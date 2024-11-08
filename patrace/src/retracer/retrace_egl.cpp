@@ -802,6 +802,7 @@ PUBLIC void retrace_eglMakeCurrent(char* src)
                 _glDebugMessageControlKHR(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION_KHR, 0, NULL, GL_FALSE);
             }
         }
+        if (gRetracer.mOptions.mIntervalSwap) eglSwapInterval(gRetracer.mState.mEglDisplay, 0);
     }
 
     if (context)
@@ -930,7 +931,7 @@ PUBLIC void retrace_eglCreateImageKHR(char* src)
     retracer::Context* context = gRetracer.mState.GetContext(ctx);
     if (tgt == EGL_GL_TEXTURE_2D_KHR)
         buffer_new = context->getTextureMap().RValue(buffer);
-    else if (tgt == EGL_NATIVE_BUFFER_ANDROID) {
+    else if (tgt == EGL_NATIVE_BUFFER_ANDROID || tgt == EGL_LINUX_DMA_BUF_EXT) {
         context = 0;        // EGL_NO_CONTEXT
         retracer::Context &curContext = gRetracer.getCurrentContext();
         int id = curContext.getGraphicBufferMap().RValue(buffer);
@@ -1363,6 +1364,24 @@ PUBLIC void retrace_eglQuerySurface(char* _src)
     }
 }
 
+PUBLIC void retrace_eglLabelObjectKHR(char* _src) {
+
+    int dpy;
+    _src = ReadFixed(_src, dpy);
+    int type; // enum
+    _src = ReadFixed(_src, type);
+    int64_t object;
+    _src = ReadFixed(_src, object);
+    char* label;
+    _src = ReadString(_src, label);
+
+    EGLDisplay d = gRetracer.mState.mEglDisplay;
+    EGLObjectKHR newobject = lookUpPolymorphic4(object, type);
+
+    _eglLabelObjectKHR(d, type, newobject, label);
+
+}
+
 const common::EntryMap retracer::egl_callbacks = {
     {"eglCreateSyncKHR", std::make_pair((void*)retrace_eglCreateSyncKHR, false)},
     {"eglClientWaitSyncKHR", std::make_pair((void*)retrace_eglClientWaitSyncKHR, false)},
@@ -1409,6 +1428,7 @@ const common::EntryMap retracer::egl_callbacks = {
     {"eglGetProcAddress", std::make_pair((void*)ignore, true)},
     {"eglCreateImageKHR", std::make_pair((void*)retrace_eglCreateImageKHR, false)},
     {"eglDestroyImageKHR", std::make_pair((void*)retrace_eglDestroyImageKHR, false)},
+    {"eglLabelObjectKHR", std::make_pair((void*)retrace_eglLabelObjectKHR, false)},
     {"glEGLImageTargetTexture2DOES", std::make_pair((void*)retrace_glEGLImageTargetTexture2DOES, false)},
     {"glEGLImageTargetTexStorageEXT", std::make_pair((void*)retrace_glEGLImageTargetTexStorageEXT, false)},
 };

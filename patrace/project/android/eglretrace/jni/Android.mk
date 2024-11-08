@@ -18,6 +18,7 @@ LOCAL_SRC_FILES 	:= \
 
 LOCAL_C_INCLUDES 	:=
 LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 
 include $(BUILD_STATIC_LIBRARY)
 
@@ -35,7 +36,7 @@ LOCAL_SRC_FILES 	:= \
 
 LOCAL_C_INCLUDES 	:= $(LOCAL_PATH)/../../thirdparty/libcollector/external/jsoncpp/include
 LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__ -DJSON_USE_EXCEPTION=0
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -66,7 +67,7 @@ LOCAL_SRC_FILES     := \
 
 LOCAL_C_INCLUDES    :=
 LOCAL_CFLAGS        :=
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -84,7 +85,7 @@ LOCAL_SRC_FILES     := \
 
 LOCAL_C_INCLUDES    :=
 LOCAL_CFLAGS        := -frtti
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -116,7 +117,7 @@ LOCAL_C_INCLUDES        := \
                     $(LOCAL_PATH)/../../thirdparty/libcollector/external/jsoncpp/include
 
 LOCAL_CFLAGS            := -O3 -frtti -D__arm__ -D__gnu_linux__ -pthread
-LOCAL_CPPFLAGS          += -std=c++11
+LOCAL_CPPFLAGS          += -std=c++14
 LOCAL_LINKFLAGS         += -pthread
 
 ifeq ($(TARGET_ARCH_ABI),x86)
@@ -138,7 +139,7 @@ LOCAL_C_INCLUDES := \
 
 LOCAL_LDLIBS    := -L$(SYSROOT)/usr/lib -nodefaultlibs -lc -lm -ldl -llog -latomic
 LOCAL_STATIC_LIBRARIES := android_native_app_glue collector_android
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_EXECUTABLE)
 
 ################################################################
@@ -178,8 +179,8 @@ LOCAL_C_INCLUDES    := \
     $(LOCAL_PATH)/../../thirdparty/libcollector/external/jsoncpp/include \
     $(LOCAL_PATH)/../../thirdparty/libpng
 LOCAL_CFLAGS        := -frtti $(PA_BUILD_64BIT) -DRETRACE
-LOCAL_CPPFLAGS      += -std=c++11
-
+LOCAL_CPPFLAGS      += -std=c++14
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -203,11 +204,11 @@ LOCAL_C_INCLUDES 	:= \
     $(LOCAL_PATH)/../../thirdparty/opengl-registry/api
 
 LOCAL_CFLAGS 		:= -frtti -D__arm__ -D__gnu_linux__ $(PA_BUILD_64BIT) -Wno-attributes
-LOCAL_CPPFLAGS          += -std=c++11
+LOCAL_CPPFLAGS          += -std=c++14
 LOCAL_CFLAGS_arm   += -U__ARM_ARCH_5__ -U__ARM_ARCH_5T__ \
 	      -U__ARM_ARCH_5E__ -U__ARM_ARCH_5TE__ \
 	      -march=armv7-a -mfpu=vfp
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_STATIC_LIBRARY)
 
 ################################################################
@@ -273,7 +274,7 @@ LOCAL_C_INCLUDES    := \
     $(LOCAL_PATH)/../../thirdparty/snappy
 
 LOCAL_CFLAGS        := -Wall -frtti -DRETRACE $(PA_BUILD_64BIT) -pthread
-LOCAL_CPPFLAGS      += -std=c++11 -DHWCPIPE_NO_JSON
+LOCAL_CPPFLAGS      += -std=c++14 -DHWCPIPE_NO_JSON
 
 ifeq ($(TARGET_ARCH_ABI),x86)
 LOCAL_CFLAGS            += -Wno-attributes
@@ -281,5 +282,5 @@ endif
 
 LOCAL_STATIC_LIBRARIES := common graphicbuffer snappy md5 jsoncpp png collector_android
 LOCAL_LDLIBS        := -nodefaultlibs -lc -lm -llog -landroid -ldl -lz -pthread
-
+LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_SHARED_LIBRARY)

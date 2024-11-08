@@ -7,7 +7,7 @@
 #include <GLES3/gl32.h>
 #include <limits.h>
 #include <set>
-#include <utility>
+#include <unordered_map>
 
 #include "tool/parse_interface.h"
 
@@ -27,6 +27,8 @@
 
 #define DEBUG_LOG(...) if (debug) DBG_LOG(__VA_ARGS__)
 
+static common::patchfile pf;
+static bool patch = false;
 static bool debug = false;
 static bool onlycount = false;
 static bool verbose = false;
@@ -42,6 +44,8 @@ static int lastframe = -1;
 static bool cull_error = false;
 static std::set<std::pair<int, int>> used_shaders; // context index + shader index
 static bool remove_unused_shaders = false;
+struct sumtype { std::string md5; GLint attachment; };
+static std::unordered_map<int, sumtype> checksums; // call number -> checksum
 
 static void printHelp()
 {
@@ -59,6 +63,8 @@ static void printHelp()
         "  --end FRAME   End frame (terminates trace here)\n"
         "  --last FRAME  Stop doing changes at this frame (copies the remaining trace without changes)\n"
         "  --verbose     Print more information while running\n"
+        "  --addsum CSV  Add checksums from CSV to the new file\n"
+        "  -p            Instead of generate a new trace file, put changes into a patch file\n"
         "  -c            Only count and report instances, do no changes\n"
         "  -G            Remove all glGetError and eglGetError calls\n"
         "  -d            Print debug messages\n"
@@ -74,12 +80,39 @@ static void printVersion()
 
 static void writeout(common::OutFile &outputFile, common::CallTM *call, bool injected = false)
 {
-    if (onlycount) return;
+    if (patch || onlycount) return;
     const unsigned int WRITE_BUF_LEN = 150*1024*1024;
     static char buffer[WRITE_BUF_LEN];
     char *dest = buffer;
     dest = call->Serialize(dest, -1, injected);
-    outputFile.Write(buffer, dest-buffer);
+    outputFile.Write(buffer, dest - buffer);
+}
+
+static void addout(common::OutFile &outputFile, common::CallTM *call, common::CallTM* provoking)
+{
+    assert(call->mCallId != 0);
+    call->mTid = provoking->mTid;
+    call->mCallNo = provoking->mCallNo;
+    if (patch)
+    {
+        common::patchfile_insert_before(pf, *call);
+        return;
+    }
+    if (onlycount) return;
+    const unsigned int WRITE_BUF_LEN = 150*1024*1024;
+    static char buffer[WRITE_BUF_LEN];
+    char *dest = buffer;
+    dest = call->Serialize(dest, -1, true);
+    outputFile.Write(buffer, dest - buffer);
+}
+
+static void removeout(common::OutFile &outputFile, common::CallTM *call)
+{
+    if (patch)
+    {
+        common::patchfile_remove(pf, call->mCallNo);
+        return;
+    }
 }
 
 static void prepass(const std::string& source_trace_filename)
@@ -109,19 +142,10 @@ static void prepass(const std::string& source_trace_filename)
     }
 }
 
-static void converter(const std::string& source_trace_filename, common::OutFile& outputFile)
+static void converter(ParseInterface& input, const std::string& source_trace_filename, common::OutFile& outputFile)
 {
     common::CallTM *call = nullptr;
     int count = 0;
-
-    ParseInterface input(true);
-    input.setQuickMode(true);
-    input.setScreenshots(false);
-    if (!input.open(source_trace_filename))
-    {
-        std::cerr << "Failed to open for reading: " << source_trace_filename << std::endl;
-        exit(-2);
-    }
     Json::Value header = input.header;
 
     // Go through entire trace file
@@ -133,14 +157,25 @@ static void converter(const std::string& source_trace_filename, common::OutFile&
             continue;
         }
 
+        if (checksums.size() > 0 && checksums.count(call->mCallNo) > 0)
+        {
+            common::CallTM newcall("glAssertFramebuffer_ARM");
+            newcall.mArgs.push_back(new common::ValueTM((GLenum)GL_DRAW_FRAMEBUFFER));
+            newcall.mArgs.push_back(new common::ValueTM((GLint)checksums.at(call->mCallNo).attachment));
+            newcall.mArgs.push_back(new common::ValueTM(checksums.at(call->mCallNo).md5));
+            addout(outputFile, &newcall, call);
+            count++;
+        }
+
         if (remove_unused_shaders && (call->mCallName == "glShaderSource" || call->mCallName == "glCompileShader" || call->mCallName == "glGetShaderiv"
-            || call->mCallName == "glDeleteShader" || call->mCallName == "glIsShader" || call->mCallName == "glGetShaderSource" || call->mCallName == "glGetShaderInfoLog"))
+            || call->mCallName == "glDeleteShader" || call->mCallName == "glIsShader" || call->mCallName == "glGetShaderSource" || call->mCallName == "glGetShaderInfoLog"
+            || call->mCallName == "glGetShaderInfoLog"))
         {
             const GLuint shader_id = call->mArgs[0]->GetAsUInt();
             int shader_index = UNBOUND;
             if (call->mCallName == "glDeleteShader") // a bit more complicated since we've already removed it from the remapping table by now
             {
-                for (const auto& s : input.contexts[input.context_index].shaders.all()) if (s.id == shader_id) shader_index = s.index;
+                for (const auto& s : input.contexts[input.context_index].shaders) if (s.id == shader_id) shader_index = s.index;
             }
             else
             {
@@ -164,21 +199,18 @@ static void converter(const std::string& source_trace_filename, common::OutFile&
                 count++;
             }
             if (!removesync) writeout(outputFile, call);
-            else count++;
+            else { removeout(outputFile, call); count++; }
         }
-        else if (call->mCallName == "glDeleteSync" && removesync) { count++; }
-        else if (call->mCallName == "glFenceSync" && removesync) { count++; }
-        else if (call->mCallName == "glGetSynciv" && removesync) { count++; }
-        else if (call->mCallName == "glIsSync" && removesync) { count++; }
-        else if (call->mCallName == "glWaitSync" && removesync) { count++; }
-        else if (call->mCallName == "eglGetSyncAttribKHR" && removesync) { count++; }
-        else if (call->mCallName == "eglDestroySyncKHR" && removesync) { count++; }
-        else if (call->mCallName == "eglCreateSyncKHR" && removesync) { count++; }
-        else if (call->mCallName == "eglClientWaitSyncKHR" && removesync) { count++; }
-        else if (call->mCallName == "glGenerateMipmap" && unused_mipmaps.count(call->mCallNo) > 0)
-        {
-            count++;
-        }
+        else if (call->mCallName == "glDeleteSync" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "glFenceSync" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "glGetSynciv" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "glIsSync" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "glWaitSync" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "eglGetSyncAttribKHR" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "eglDestroySyncKHR" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "eglCreateSyncKHR" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "eglClientWaitSyncKHR" && removesync) { removeout(outputFile, call); count++; }
+        else if (call->mCallName == "glGenerateMipmap" && unused_mipmaps.count(call->mCallNo) > 0) { removeout(outputFile, call); count++; }
         else if (call->mCallName == "glBufferData")
         {
             const GLenum target = call->mArgs[0]->GetAsUInt();
@@ -204,16 +236,22 @@ static void converter(const std::string& source_trace_filename, common::OutFile&
             {
                 writeout(outputFile, call);
             } // else skip it
-            else count++;
+            else
+            {
+                count++;
+                removeout(outputFile, call);
+            }
         }
         else if ((call->mCallName == "eglGetError" || call->mCallName == "glGetError") && cull_error)
         {
             // don't output it
             count++;
+            removeout(outputFile, call);
         }
         else if (removeTS && call->mCallName == "paTimestamp")
         {
             count++; // don't output it
+            removeout(outputFile, call);
         }
         else if (call->mCallName == "glTexStorage3D" || call->mCallName == "glTexStorage2D" || call->mCallName == "glTexStorage1D"
              || call->mCallName == "glTexStorage3DEXT" || call->mCallName == "glTexStorage2DEXT" || call->mCallName == "glTexStorage1DEXT"
@@ -232,6 +270,7 @@ static void converter(const std::string& source_trace_filename, common::OutFile&
                 if (unused_textures.count(std::make_pair(input.context_index, target_texture_index)) > 0)
                 {
                     count++;
+                    removeout(outputFile, call);
                     continue;
                 }
             }
@@ -257,8 +296,7 @@ static void converter(const std::string& source_trace_filename, common::OutFile&
                 const unsigned tsize = width * height * 4 * 4; // max size
                 std::vector<char> zeroes(tsize);
                 c.mArgs.push_back(common::CreateBlobOpaqueValue(tsize, zeroes.data()));
-                c.mTid = call->mTid;
-                writeout(outputFile, &c, true);
+                addout(outputFile, &c, call);
                 count++;
             }
             else if ((call->mCallName == "glTexStorage3D" || call->mCallName == "glTexImage3D") && uninit_textures.count(std::make_pair(input.context_index, target_texture_index)) > 0)
@@ -290,8 +328,7 @@ static void converter(const std::string& source_trace_filename, common::OutFile&
                         c.mArgs.push_back(new common::ValueTM(tsize)); // image size
                         std::vector<char> zeroes(tsize);
                         c.mArgs.push_back(common::CreateBlobOpaqueValue(tsize, zeroes.data()));
-                        c.mTid = call->mTid;
-                        writeout(outputFile, &c, true);
+                        addout(outputFile, &c, call);
                     }
                 }
                 else // uncompressed
@@ -312,8 +349,7 @@ static void converter(const std::string& source_trace_filename, common::OutFile&
                         const unsigned tsize = w * h * 4 * 4; // max size
                         std::vector<char> zeroes(tsize);
                         c.mArgs.push_back(common::CreateBlobOpaqueValue(tsize, zeroes.data()));
-                        c.mTid = call->mTid;
-                        writeout(outputFile, &c, true);
+                        addout(outputFile, &c, call);
                     }
                 }
                 count++;
@@ -326,7 +362,7 @@ static void converter(const std::string& source_trace_filename, common::OutFile&
     }
     input.close();
     printf("Calls changed: %d\n", count);
-    if (!onlycount)
+    if (!onlycount && !patch)
     {
         Json::Value info;
         info["count"] = count;
@@ -395,6 +431,10 @@ int main(int argc, char **argv)
             remove_unused_shaders = true;
             do_prepass = true;
         }
+        else if (arg == "-p")
+        {
+            patch = true;
+        }
         else if (arg == "-c")
         {
             onlycount = true;
@@ -410,6 +450,20 @@ int main(int argc, char **argv)
         else if (arg == "--removeTS")
         {
             removeTS = true;
+        }
+        else if (arg == "--addsum")
+        {
+            argIndex++;
+            FILE* fp = fopen(argv[argIndex], "r");
+            if (!fp) { printf("Error: Unable to open %s: %s\n", argv[argIndex], strerror(errno)); return -11; }
+            int call = -1;
+            GLint attachment = -1;
+            char checksum[200];
+            int ignore = fscanf(fp, "%*[^\n]\n");
+            (void)ignore;
+            while (fscanf(fp, "%d,%d,%*d,%*d,%*d,%s\n", &call, &attachment, checksum) == 3) checksums[call] = sumtype{ checksum, attachment };
+            DBG_LOG("Loaded %d checksums from %s\n", (int)checksums.size(), argv[argIndex]);
+            fclose(fp);
         }
         else if (arg == "--mipmap")
         {
@@ -482,8 +536,22 @@ int main(int argc, char **argv)
     }
     std::string source_trace_filename = argv[argIndex++];
     if (do_prepass) prepass(source_trace_filename);
+    ParseInterface input(true);
+    input.setQuickMode(true);
+    input.setScreenshots(false);
+    if (!input.open(source_trace_filename))
+    {
+        std::cerr << "Failed to open for reading: " << source_trace_filename << std::endl;
+        exit(-2);
+    }
     common::OutFile outputFile;
-    if (!onlycount)
+    if (patch)
+    {
+        std::string target_trace_filename = argv[argIndex++];
+        pf = common::patchfile_open(input.inputFile, target_trace_filename.c_str());
+        DBG_LOG("Opened patchfile %s\n", target_trace_filename.c_str());
+    }
+    else if (!onlycount && !patch)
     {
         std::string target_trace_filename = argv[argIndex++];
         if (!outputFile.Open(target_trace_filename.c_str()))
@@ -492,7 +560,8 @@ int main(int argc, char **argv)
             return 1;
         }
     }
-    converter(source_trace_filename, outputFile);
-    outputFile.Close();
+    converter(input, source_trace_filename, outputFile);
+    if (!onlycount && !patch) outputFile.Close();
+    if (patch) common::patchfile_close(pf);
     return 0;
 }

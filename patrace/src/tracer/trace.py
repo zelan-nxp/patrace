@@ -356,7 +356,8 @@ class UserArrays:
 
 class Tracer:
     def traceFunctionInject(self, func):
-        print(func.prototype('inject_' + func.name) + '{')
+        print(func.prototype('inject_' + func.name))
+        print('{')
         print('    unsigned char tid = GetThreadId();')
         if func.type is not stdapi.Void:
             print('    %s _result;' % func.type)
@@ -369,7 +370,8 @@ class Tracer:
         print()
 
     def traceFunction(self, func):
-        print(func.prototype('patrace_' + func.name) + '{')
+        print(func.prototype('patrace_' + func.name))
+        print('{')
 
         print('    unsigned char tid = GetThreadId();')
         print('    UpdateTimesEGLConfigUsed(tid);')
@@ -392,9 +394,11 @@ class Tracer:
             print('extern "C" PUBLIC ' + func.prototype() + ';')
 
         if func.name == 'glGetAttribLocation':
-            print('GLint GLES_CALLCONVENTION glGetAttribLocation(GLuint program, const GLchar * name) {')
+            print('GLint GLES_CALLCONVENTION glGetAttribLocation(GLuint program, const GLchar * name)')
+            print('{')
         else:
-            print(func.prototype() + ' {')
+            print(func.prototype())
+            print('{')
 
         params = ', '.join([str(arg.name) for arg in func.args])
 
@@ -408,22 +412,9 @@ class Tracer:
         print()
 
     def traceFunctionBody(self, func, mark_as_injected = False):
-        print('    // traceFunctionBody')
         global gIdToLength
 
-        invoke_func = func
-
-        print('    if (gTraceThread.at(tid).mCallDepth)')
-        print('    {')
-        print('        //DBG_LOG("WARNING: Recursive glCall. Depth: %d\\n", gTraceThread.at(tid).mCallDepth);')
-        self.invokeFunction(invoke_func, indent=' ' * 8)
-        if func.type is stdapi.Void:
-            print('        return;')
-        else:
-            print('        return _result;')
-        print('    }')
-
-        self.invokeFunction(invoke_func)
+        self.invokeFunction(func)
 
         if func.name == 'eglCreateWindowSurface':
             print('    EGLint x = 0, y = 0, width = 0, height = 0;')
@@ -433,7 +424,7 @@ class Tracer:
             print('        DBG_LOG("Failed to query surface height\\n");')
 
         if func.name in ['eglCreateImage', 'eglCreateImageKHR']:
-            print('    if (target == EGL_NATIVE_BUFFER_ANDROID) {')
+            print('    if (target == EGL_NATIVE_BUFFER_ANDROID || target == EGL_LINUX_DMA_BUF_EXT) {')
             print('        // Create a texture based on the the newly created EGLImage.')
             print('        // The texture created, will be used as an EGLImage when retracing.')
             print('        GLuint textureId = pre_%s(dpy, _result, target, buffer, attrib_list);' % func.name)
@@ -475,9 +466,8 @@ class Tracer:
             print('    {')
             print('        params[bufSize - 1] = 2; // the list is always sorted in descending order, and 2 is always the minimum possible')
             print('    }')
-        print('    // save parameters')
         print('    gTraceOut->callMutex.lock();')
-        print('    char* dest = gTraceOut->writebuf;')
+        print('    char* dest = gTraceOut->Start();')
         if func.sideeffects:
             print('    if (tracerParams.Timestamping) dest = inject_timestamp(tid, dest);')
         if func.name == 'glEGLImageTargetTexture2DOES':
@@ -521,13 +511,6 @@ class Tracer:
             print('    pCall->funcId = %s2_id;' % (func.name))
         else:
             print('    pCall->funcId = %s_id;' % (func.name))
-        print('#ifdef DEBUG')
-        print('    if (pCall->funcId > common::ApiInfo::MaxSigId)')
-        print('    {')
-        print('        DBG_LOG("Fatal error: Trying to write bad func ID for %s!\\n");' % func.name)
-        print('        abort();')
-        print('    }')
-        print('#endif')
         print('    pCall->tid = tid;')
         print('    pCall->source = %s;' % ('0' if not mark_as_injected else '1'))
         print('    pCall->reserved = 0;')
@@ -548,30 +531,17 @@ class Tracer:
         if func.name.startswith('gl') and func.name != 'glGetError':
             print('    pCall->errNo = GetCallErrorNo("%s", tid);' % func.name)
         if gIdToLength[func.id] == '0':
-            print('    pCall->toNext = dest-gTraceOut->writebuf;')
-            print('#ifdef DEBUG')
-            print('    if (pCall->toNext == 0)')
-            print('    {')
-            print('        DBG_LOG("Zero-length variable call detected for %s in call %%d\\n", (int)gTraceOut->callNo);' % func.name)
-            print('        abort();')
-            print('    }')
-            print('#endif')
-
-        print('    gTraceOut->WriteBuf(dest);')
+            print('    gTraceOut->WriteVlen(dest);')
+        else:
+            print('    gTraceOut->WriteBuf(dest);')
         print('    gTraceOut->callNo++;')
-        if func.name in ['eglSwapBuffers', 'eglSwapBuffersWithDamageKHR']: # must be before mutex unlock
-            print('    after_eglSwapBuffers();')
-        print('    gTraceOut->callMutex.unlock();')
 
     def invokeFunction(self, func, prefix='_', suffix='', indent='    '):
         if func.name in ignore_functions:
             print('%s// deliberately not calling the function while tracing' % indent)
             return
-        print('%s// invokeFunction' % indent)
         if func.name == 'glCreateShaderProgramv' or func.name == 'glCreateShaderProgramvEXT':
-            print('%s++gTraceThread.at(tid).mCallDepth;' % indent)
             print('%s_result = replace_glCreateShaderProgramv(tid, type, count, strings);' % indent)
-            print('%s--gTraceThread.at(tid).mCallDepth;' % indent)
             return
         if func.name == 'glStateDump_ARM':
             print('%sgTraceOut->getStateLogger().logState(tid);' % indent)
@@ -635,27 +605,22 @@ class Tracer:
             print('%s}' % indent)
             print('%selse' % indent)
             print('%s{' % indent)
-            print('%s    ++gTraceThread.at(tid).mCallDepth;' % indent)
             print('%s    %s%s(%s);' % (indent, result, dispatch, params))
-            print('%s    --gTraceThread.at(tid).mCallDepth;' % indent)
             print('%s}' % indent)
             return
 
         if func.name == 'eglSwapBuffersWithDamageKHR':
-            print('%s++gTraceThread.at(tid).mCallDepth;' % indent)
             print('%s%s%s(%s);' % (indent, result, dispatch, params))
             print('%sif (!_result)' % indent)
             print('%s{' % indent)
             print('%s    // the eglSwapBuffersWithDamageKHR may not be supported so fall back eglSwapBuffers' % indent)
             print('%s    _result = _eglSwapBuffers(dpy, surface);' % indent)
             print('%s}' % indent)
-            print('%s--gTraceThread.at(tid).mCallDepth;' % indent)
             return
 
         if func.name in ['glMapBuffer', 'glMapBufferOES']:
             print('%sGLint length;' % indent)
             print()
-            print('%s++gTraceThread.at(tid).mCallDepth;' % indent)
             print('%s%s%s(%s);' % (indent, result, dispatch, params))
             print('%s_glGetBufferParameteriv(target, GL_BUFFER_SIZE, &length);' % indent)
             print('%s_glUnmapBuffer(target);' % indent)
@@ -666,7 +631,6 @@ class Tracer:
             print('%s    DBG_LOG("the glMapBufferRange() is not supported, fall back to %s()\\n");' % (indent, func.name))
             print('%s    %s%s(%s);' % (indent, result, dispatch, params))
             print('%s}' %indent)
-            print('%s--gTraceThread.at(tid).mCallDepth;' % indent)
             print('%sGetCurTraceContext(tid)->isFullMapping = true;' % indent)
             return
 
@@ -681,17 +645,13 @@ class Tracer:
             print('%s}' % indent)
             print('%selse // run normally (with binary shaders - yay)' % indent)
             print('%s{' % indent)
-            print('%s    ++gTraceThread.at(tid).mCallDepth;' % indent)
             print('%s    %s%s(%s);' % (indent, result, dispatch, params))
-            print('%s    --gTraceThread.at(tid).mCallDepth;' % indent)
             print('%s    DBG_LOG("Calling %s -- your trace will contain binary shaders!\\n");' % (indent, func.name))
             print('%s}' % indent)
             return
 
         print()
-        print('%s++gTraceThread.at(tid).mCallDepth;' % indent)
         print('%s%s%s(%s);' % (indent, result, dispatch, params))
-        print('%s--gTraceThread.at(tid).mCallDepth;' % indent)
         print()
 
         if func.name == 'glGetString':
@@ -798,7 +758,6 @@ class Tracer:
         print('#endif // GLESLAYER')
 
     def traceFunctionBody_pre(self, func):
-        print('    // traceFunctionBody_pre')
         if (func.name in array_pointer_function_names):
             print('    GLint _array_buffer = 0;')
             print('    _glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &_array_buffer);')
@@ -891,7 +850,6 @@ class Tracer:
             print('    pre_eglSwapBuffers();')
 
     def traceFunctionBody_after(self, func):
-        print('    // traceFunctionBody_after')
         if func.name == 'eglInitialize':
             print('    after_eglInitialize(dpy);')
         if func.name == 'eglTerminate':
@@ -950,11 +908,15 @@ class Tracer:
             print('    after_glDraw();')
         if func.name == ['glUnmapBufferOES', 'glUnmapBuffer']:
             print('    after_glUnmapBuffer(target);')
+        if func.name in ['eglSwapBuffers', 'eglSwapBuffersWithDamageKHR']:
+            print('    after_eglSwapBuffers();')
 
         params = ', '.join([str(arg.name) for arg in func.args])
 
         if func.name in post_functions:
             print('    after_%s(%s);' % (func.name, params))
+
+        print('    gTraceOut->callMutex.unlock();')
 
 class TypeLengthVisitor(stdapi.Visitor):
     def __init__(self):
@@ -1105,7 +1067,7 @@ if __name__ == '__main__':
         print('    dest = WriteFixed<uint64_t>(dest, ts);')
         print('    gTraceOut->WriteBuf(dest);')
         print('    gTraceOut->callNo++;')
-        print('    return gTraceOut->writebuf;')
+        print('    return gTraceOut->Start();')
         print('}')
         print()
         api.delFunctionByName("glClientSideBufferData")

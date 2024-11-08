@@ -34,6 +34,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <string>
 
 #ifdef _WIN32
 #ifndef snprintf
@@ -115,5 +116,8 @@ std::string _to_string(T value)
 #else
 #define _to_string(_x) std::to_string(_x)
 #endif
+
+void set_thread_name(const std::string& name);
+std::string get_thread_name();
 
 #endif /* _OS_HPP_ */

@@ -6,6 +6,12 @@
 
 #include <eglstate/common.hpp>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <GLES3/gl32.h>
 #include <cmath>
 #include <vector>
@@ -18,22 +24,9 @@
 
 using namespace std;
 
-namespace
-{
-
 const char *DEFAULT_LOAD_FILTER_STRING = "gl";
 
-void replaceString(std::string& haystack, const std::string& needle, const std::string& replacement)
-{
-    size_t pos = 0;
-    while ((pos = haystack.find(needle, pos)) != std::string::npos)
-    {
-        haystack.replace(pos, needle.length(), replacement);
-        pos += replacement.length();
-    }
-}
-
-bool IsQueryCall(const std::string &callName)
+static bool IsQueryCall(const std::string &callName)
 {
     // Firstly check the exceptions of glGet
     if (callName == "glGetAttribLocation" ||
@@ -53,12 +46,10 @@ bool IsQueryCall(const std::string &callName)
     return false;
 }
 
-bool MatchFilterString(const std::string &callName, const std::string &filterStr)
+static bool MatchFilterString(const std::string &callName, const std::string &filterStr)
 {
     // this function is called for each line/call in an open trace frame
     return (callName.find(filterStr) != std::string::npos);
-}
-
 }
 
 namespace common {
@@ -709,9 +700,7 @@ std::string ValueTM::ToC(const CallTM *call, bool asSourceCode)
         }
         break;
     case String_Type:
-        strTmp = std::string(mStr);
-        replaceString(strTmp, "\"", "\\\""); // escape quotes
-        sstream << "\"" << strTmp << "\""; //surround with quotes
+        sstream << std::string(mStr);
         break;
     case Array_Type:
         if (mArrayLen) {
@@ -817,8 +806,7 @@ std::string ValueTM::TypeNameToStr()
     };
 }
 
-
-char* ValueTM::Serialize(char* dest, bool doPadding)
+char* ValueTM::Serialize(char* dest, bool doPadding) const
 {
     switch (mType) {
     case Int8_Type:
@@ -1041,6 +1029,106 @@ CallTM::CallTM(InFile &infile, unsigned callNo, const BCall_vlen &call)
     (*(ParseFunc)fptr)(src, *this, infile.getHeaderVersion());
 }
 
+patchfile patchfile_open(const InFileBase& infile, const char* filename)
+{
+    patchfile p;
+    p.filename = filename;
+    p.ptr = (char*)mmap(nullptr, UINT32_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p.ptr == MAP_FAILED)
+    {
+        DBG_LOG("Map failed: %s\n", strerror(errno));
+        exit(-1);
+    }
+    *((uint32_t*)(p.ptr + 0)) = PATCHFILE_MAGIC_WORD;
+    *((uint32_t*)(p.ptr + 4)) = gApiInfo.MaxSigId;
+    p.dest = p.ptr + 8;
+
+    // first print old dictionary
+    for (unsigned i = 0; i < infile.mExIdToName.size(); i++)
+    {
+        const std::string name = infile.mExIdToName.at(i);
+        if (!name.empty()) { strcpy(p.dest, name.c_str()); p.dest += name.size(); }
+        *p.dest = 0; // null terminate string
+        p.dest++;
+    }
+    // add new entries
+    unsigned extra = infile.mExIdToName.size();
+    for (unsigned i = 0; i < gApiInfo.MaxSigId; i++)
+    {
+        const char* name = gApiInfo.IdToNameArr[i];
+        if (!name) { continue; }
+        bool found = false;
+        for (unsigned j = 0; j < infile.mExIdToName.size(); j++) // is it already in the trace file?
+        {
+            if (strcmp(name, infile.mExIdToName.at(j).c_str()) == 0) { p.remap[i] = j; found = true; break; }
+        }
+        if (!found) { strcpy(p.dest, name); p.dest += strlen(name); *p.dest = 0; p.dest++; p.remap[i] = extra++; }
+    }
+
+    return p;
+}
+
+void patchfile_close(patchfile& p)
+{
+    *((uint32_t*)p.dest) = UINT32_MAX; // add patch file terminator
+    p.dest += 4;
+    FILE* fp = fopen(p.filename.c_str(), "wb");
+    if (!fp)
+    {
+        DBG_LOG("Open of %s failed: %s\n", p.filename.c_str(), strerror(errno));
+        exit(-1);
+    }
+    size_t written = 0;
+    int err = 0;
+    size_t size = p.dest - p.ptr;
+    DBG_LOG("Writing patchfile %s of size \%u\n", p.filename.c_str(), (unsigned)size);
+    do {
+        written = fwrite(p.ptr, 1, size, fp);
+        p.ptr += written;
+        size -= written;
+        err = ferror(fp);
+    } while (size > 0 && (err == EAGAIN || err == EWOULDBLOCK || err == EINTR));
+    if (err)
+    {
+        DBG_LOG("Failed to write %s: %s\n", p.filename.c_str(), strerror(err));
+        os::abort();
+    }
+    assert(size == 0);
+    fflush(fp);
+    fclose(fp);
+    munmap(p.ptr, size);
+    p.dest = nullptr;
+    p.ptr = nullptr;
+}
+
+void patchfile_insert_before(patchfile& p, const CallTM& newcall)
+{
+    *((uint32_t*)(p.dest + 0)) = newcall.mCallNo; // call number
+    unsigned newsize = newcall.Serialize(p.dest + 12, -1, true) - (p.dest + 12);
+    *((uint32_t*)(p.dest + 4)) = newsize; // size of call
+    *((uint32_t*)(p.dest + 8)) = 0; // flags
+    *((uint16_t*)(p.dest + 12)) = p.remap.at(newcall.mCallId); // overwrite call id
+    p.dest += 12 + newsize;
+}
+
+void patchfile_replace(patchfile& p, const CallTM& newcall)
+{
+    *((uint32_t*)(p.dest + 0)) = newcall.mCallNo; // call number
+    unsigned newsize = newcall.Serialize(p.dest + 12, -1, true) - (p.dest + 12);
+    *((uint32_t*)(p.dest + 4)) = newsize; // size of call
+    *((uint32_t*)(p.dest + 8)) = 1; // flags
+    *((uint16_t*)(p.dest + 12)) = p.remap.at(newcall.mCallId); // overwrite call id
+    p.dest += 12 + newsize;
+}
+
+void patchfile_remove(patchfile& p, unsigned callno)
+{
+    *((uint32_t*)(p.dest + 0)) = callno; // call number
+    *((uint32_t*)(p.dest + 4)) = 0; // no payload data
+    *((uint32_t*)(p.dest + 8)) = 2; // flags
+    p.dest += 12;
+}
+
 bool CallTM::Load(InFileRA *infile)
 {
     void *fptr = nullptr;
@@ -1103,7 +1191,7 @@ std::string CallTM::ToStr(bool isAbbreviate)
     return mRet.ToStr(this, isAbbreviate ? 32 : 0) + " " + mCallName + "(" + strArgs + ")" + strErr;
 }
 
-char* CallTM::Serialize(char* dest, int overrideID, bool injected)
+char* CallTM::Serialize(char* dest, int overrideID, bool injected) const
 {
     if (mCallId == 0) // This call is not supported by ApiInfo
     {

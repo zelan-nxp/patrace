@@ -18,6 +18,7 @@
 #include <set>
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
 
 namespace common {
 
@@ -36,6 +37,20 @@ struct OpaqueArg {
     };
 
 };
+
+// Patch file support functions
+struct patchfile
+{
+    char* ptr = nullptr; // original mmap pointer
+    char* dest = nullptr; // current pointer position
+    std::string filename;
+    std::unordered_map<int, int> remap; // remap our api id to trace file api id
+};
+patchfile patchfile_open(const InFileBase& infile, const char* filename);
+void patchfile_insert_before(patchfile& p, const CallTM& newcall); // add this one before existing one with same call number
+void patchfile_replace(patchfile& p, const CallTM& newcall); // replace existing with this one
+void patchfile_remove(patchfile& p, unsigned callno); // remove existing call
+void patchfile_close(patchfile& p);
 
 class ValueTM
 {
@@ -144,7 +159,7 @@ public:
     std::string ToStr(const CallTM *call, int maxLen=32);
     std::string ToC(const CallTM *call, bool asSourceCode=false);
     std::string TypeNameToStr();
-    char* Serialize(char* dest, bool doPadding);
+    char* Serialize(char* dest, bool doPadding) const;
 
     ValueTM(const ValueTM &other);
     ValueTM &operator =(const ValueTM &other);
@@ -251,7 +266,7 @@ public:
     bool mInjected = false;
 
     std::string ToStr(bool isAbbreviate = true);
-    char* Serialize(char* dest, int overrideID = -1, bool injected = false);
+    char* Serialize(char* dest, int overrideID = -1, bool injected = false) const;
 
 private:
     CallTM(const CallTM &);

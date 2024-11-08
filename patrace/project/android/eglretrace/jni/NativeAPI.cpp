@@ -195,3 +195,8 @@ JNIEXPORT void JNICALL Java_com_arm_pa_paretrace_NativeAPI_stepmodefinish(JNIEnv
 {
     gRetracer.mFinish = true;
 }
+
+JNIEXPORT jboolean JNICALL Java_com_arm_pa_paretrace_NativeAPI_loadAndroidRetraceOptionsFromHeader(JNIEnv *env, jclass)
+{
+    return gRetracer.mOptions.mTranslucentSurface;
+}

@@ -19,7 +19,7 @@
 static void printHelp()
 {
     std::cout <<
-        "Usage : replace_shader [OPTIONS] <source trace> <callNo> <target trace>\n"
+        "Usage : replace_shader [OPTIONS] <source trace> <callNo> <target trace or patch file>\n"
         "\n"
         "<callNo> must refer to a glShaderSource-call. The shader at that call\n"
         "will be replaced to shader.txt in the current working directory\n"
@@ -28,6 +28,7 @@ static void printHelp()
         "  -h     print help\n"
         "  -v     print version\n"
         "  -d     dump existing shader to shader.txt in CWD\n"
+        "  -p     instead of creating a new target trace, output a patch file for the source\n"
         ;
 }
 
@@ -48,6 +49,7 @@ static void writeout(common::OutFile &outputFile, common::CallTM *call)
 int main(int argc, char **argv)
 {
     bool dump = false;
+    bool patch = false;
 
     int argIndex = 1;
     for (; argIndex < argc; ++argIndex)
@@ -71,6 +73,10 @@ int main(int argc, char **argv)
         {
             dump = true;
         }
+        else if (!strcmp(arg, "-p"))
+        {
+            patch = true;
+        }
         else
         {
             printf("Error: Unknow option %s\n", arg);
@@ -79,7 +85,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (argIndex + 3 > argc)
+    if ((argIndex + 3 > argc && !dump) || (argIndex + 2 > argc && dump))
     {
         printHelp();
         return 1;
@@ -88,7 +94,6 @@ int main(int argc, char **argv)
     std::string source_trace_filename = argv[argIndex++];
     std::string callNoStr = argv[argIndex++];
     unsigned callNo = std::stoi(callNoStr);
-    std::string target_trace_filename = argv[argIndex++];
 
     common::gApiInfo.RegisterEntries(common::parse_callbacks);
 
@@ -101,11 +106,22 @@ int main(int argc, char **argv)
     }
 
     // Load output trace
+    common::patchfile pf;
     common::OutFile tmpFile;
-    if (!tmpFile.Open(target_trace_filename.c_str()))
+    if (patch)
     {
-        PAT_DEBUG_LOG("Failed to open for writing: %s\n", target_trace_filename.c_str());
-        return 1;
+        std::string target_trace_filename = argv[argIndex++];
+        pf = common::patchfile_open(*inputFile.mpInFileRA, target_trace_filename.c_str());
+        DBG_LOG("Opened patchfile %s\n", target_trace_filename.c_str());
+    }
+    else if (!dump)
+    {
+        std::string target_trace_filename = argv[argIndex++];
+        if (!tmpFile.Open(target_trace_filename.c_str()))
+        {
+            PAT_DEBUG_LOG("Failed to open for writing: %s\n", target_trace_filename.c_str());
+            return 1;
+        }
     }
 
     // Iterate over all calls
@@ -141,10 +157,11 @@ int main(int argc, char **argv)
                 call->mArgs[2]->mArray[0].SetAsString(buffer.str());
                 call->mArgs[3]->mArrayLen = 0;
                 DBG_LOG("Replaced shader!\n");
+                if (patch) common::patchfile_replace(pf, *call);
             }
         }
 
-        writeout(tmpFile, call);
+        if (!dump && !patch) writeout(tmpFile, call);
     }
 
     // Write header
@@ -152,13 +169,16 @@ int main(int argc, char **argv)
     Json::Value info;
     addConversionEntry(header, "replace_shader", source_trace_filename, info);
 
-    Json::FastWriter writer;
-    const std::string json_header = writer.write(header);
-    tmpFile.mHeader.jsonLength = json_header.size();
-    tmpFile.WriteHeader(json_header.c_str(), json_header.size());
-
+    if (!dump && !patch)
+    {
+        Json::FastWriter writer;
+        const std::string json_header = writer.write(header);
+        tmpFile.mHeader.jsonLength = json_header.size();
+        tmpFile.WriteHeader(json_header.c_str(), json_header.size());
+        tmpFile.Close();
+    }
+    if (patch) common::patchfile_close(pf);
     inputFile.Close();
-    tmpFile.Close();
 
     return 0;
 }

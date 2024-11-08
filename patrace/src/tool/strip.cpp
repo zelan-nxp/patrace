@@ -20,6 +20,7 @@ static void printHelp()
 {
     std::cout <<
         "Usage : strip <thread id> <source trace> <target trace>\n"
+        "Strip out all calls from a specific thread from the given trace\n"
         "Options:\n"
         "  -h            print help\n"
         "  -v            print version\n"

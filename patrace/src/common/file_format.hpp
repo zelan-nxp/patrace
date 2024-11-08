@@ -6,13 +6,14 @@
 #include "trace_limits.hpp"
 #include "my_egl_attribs.hpp"
 
+#define PATCHFILE_MAGIC_WORD 0xf1e1
+
 #ifdef WIN32
 #   pragma warning(disable: 4200)
 #endif
 
 namespace common {
 
-#define VERBOSE_FILE 0
 
 #pragma pack(push, 1)
 
@@ -185,7 +186,7 @@ struct BCall {
 struct BCall_vlen : BCall { // variable length
     BCall_vlen() : BCall(), toNext(0) {}
     BCall_vlen(const BCall& b) : BCall(b), toNext(0) {}
-    unsigned int toNext;
+    unsigned int toNext; // bytes from start of block to next block
 };
 
 #pragma pack(pop)
@@ -210,20 +211,12 @@ inline char* padwrite(char* x) {
 
 template <class T>
 inline char* WriteFixed(char* dest, T val, bool doPadding = true) {
-#if VERBOSE_FILE
-    if ((PTR_OFFSET(dest, 4) != 0) && doPadding)
-        DBG_LOG("Un-aligned mem addr: %p\n", dest);
-#endif
     memcpy(dest, &val, sizeof(T));
     return doPadding ? padwrite(dest+sizeof(T)) : (dest+sizeof(T));
 }
 
 template <class T>
 inline char* Write1DArray(char* dest, unsigned int len, const T* array) {
-#if VERBOSE_FILE
-    if (PTR_OFFSET(dest, 4) != 0)
-        DBG_LOG("Un-aligned mem addr: %p\n", dest);
-#endif
     // There are some cases, the array could be an optional parameter
     // so we cannot count on the value of *len*
     if (array == NULL)
@@ -294,23 +287,8 @@ inline char* ToNextBlock(T* pCur) {
     return ((char*)pCur) + pCur->toNext;
 }
 
-#if 0
-template <>
-inline char* ToNextBlock(BCall* pCall) {
-    unsigned int byLen = GetSerializationLen(pCall->funcId);
-    if (byLen > 0)
-        return ((char*)pCall) + byLen;
-    else
-        return ((char*)pCall) + pCall->toNext;
-}
-#endif
-
 template <class T>
 inline void PeekFixed(char* src, T& val) {
-#if VERBOSE_FILE
-    if (PTR_OFFSET(src, 4) != 0)
-        DBG_LOG("Un-aligned mem addr: %p\n", src);
-#endif
     val = *(T*)src;
 }
 
@@ -322,10 +300,6 @@ inline char* ReadFixed(char* src, T& val) {
 
 template <class T>
 inline char* Read1DArray(char* src, Array<T>& arr) {
-#if VERBOSE_FILE
-    if (PTR_OFFSET(src, 4) != 0)
-        DBG_LOG("Un-aligned mem addr: %p\n", src);
-#endif
     unsigned int byLen;
     src = ReadFixed(src, byLen);
     arr.cnt = byLen/sizeof(T);
@@ -337,9 +311,6 @@ inline char* ReadString(char* src, char*& str) {
     unsigned int strLen;
     PeekFixed(src, strLen);
     str = strLen ? src+sizeof(strLen) : NULL;
-    //if (len)
-    //    *len = strLen;
-
     return PTR_PADDING(src+sizeof(strLen)+strLen, 4);
 }
 

@@ -12,7 +12,7 @@ target_link_libraries (EGL
     dl
     rt
 )
-
+set_target_properties(EGL PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_library(GLESv1_CM SHARED
 	${SRC_FAKEDRIVER_GLES1}
 )
@@ -22,7 +22,7 @@ target_link_libraries (GLESv1_CM
     dl
     rt
 )
-
+set_target_properties(GLESv1_CM PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_library(GLESv2 SHARED
 	${SRC_FAKEDRIVER_GLES2_GLES3}
 )
@@ -33,5 +33,5 @@ target_link_libraries (GLESv2
     rt
     common
 )
-
-install(TARGETS EGL GLESv1_CM GLESv2 LIBRARY DESTINATION lib)
+set_target_properties(GLESv2 PROPERTIES LINK_FLAGS "-z max-page-size=16384")
+install(TARGETS EGL GLESv1_CM GLESv2 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})

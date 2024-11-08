@@ -18,8 +18,6 @@
 #include "common/out_file.hpp"
 #include "common/api_info.hpp"
 
-#define SNAPPY_CHUNK_SIZE (1*1024*1024)
-
 /// Set this to true to write out an .ra file of the data. This can be used to verify this code by comparing to the .ra file
 /// output of eg trace_to_txt -- it should be bit perfect identical.
 #define WRITE_RA_FILE false

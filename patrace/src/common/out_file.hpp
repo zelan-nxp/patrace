@@ -10,12 +10,18 @@
 
 namespace common {
 
-#define SNAPPY_CHUNK_SIZE (1*1024*1024)
+/// We abuse the fact that Linux doesn't actually use allocated memory unless it is touched, and allocate an absurd amount of it.
+/// That way we don't have to check for buffer overruns and Linux takes care of stitching memory together for us using its virtual
+/// memory system.
+#define SNAPPY_MAX_SIZE UINT32_MAX
+
+/// Try to keep compression buffers below this size.
+#define SNAPPY_CHUNK_SIZE (16*1024*1024)
 
 class OutFile {
 public:
-    OutFile();
-    OutFile(const char *name);
+    OutFile() { Init(); }
+    OutFile(const char *name) { Init(); Open(name); }
     ~OutFile();
 
     bool Open(const char* name = NULL, bool writeSigBook = true, const std::vector<std::string> *sigbook = NULL, bool write_timestamp = false);
@@ -23,40 +29,22 @@ public:
     void Flush();
     void WriteHeader(const char* buf, unsigned int len, bool verbose = true);
 
-    inline void Write(const void* buf, unsigned int len) {
-        if (len == 0 || !mIsOpen)
-            return;
+    /// Give us some scratch memory. You can call this before you have opened the output file.
+    char* Scratch() const { return mCacheP; }
 
-        if (FreeSize() > len) {
-            memcpy(mCacheP, buf, len);
-            mCacheP += len;
-        } else if (FreeSize() == len) {
-            memcpy(mCacheP, buf, len);
-            mCacheP += len;
-            Flush();
-        } else {
-            Flush();
-            if (mCacheLen < int(len))
-                CreateCache(len);
-            memcpy(mCacheP, buf, len);
-            mCacheP += len;
-        }
-    }
+    /// Let us know how much memory we just used from our scratch memory.
+    void Progress(ssize_t used) { mCacheP += used; if (UsedSize() > SNAPPY_CHUNK_SIZE) Flush(); }
+
+    /// Deprecated legacy function that does a totally unnecessary memcpy.
+    inline void Write(const void* buf, unsigned int len) { memcpy(mCacheP, buf, len); Progress(len); }
 
     std::string getFileName() const;
 
-    common::BHeaderV3   mHeader;
+    common::BHeaderV3 mHeader;
 
 private:
-    void CreateCache(int len);
-
-    inline unsigned int UsedSize() const {
-        return mCacheP - mCache;
-    }
-
-    inline unsigned int FreeSize() const {
-        return mCacheLen - UsedSize();
-    }
+    void Init();
+    inline ssize_t UsedSize() const { return mCacheP - mCache; }
 
     inline void filewrite(const char* ptr, size_t size)
     {
@@ -75,7 +63,8 @@ private:
         }
     }
 
-    void WriteCompressedLength(unsigned int len) {
+    void WriteCompressedLength(unsigned int len)
+    {
         unsigned char buf[4];
         buf[0] = len & 0xff; len >>= 8;
         buf[1] = len & 0xff; len >>= 8;
@@ -85,20 +74,14 @@ private:
     }
 
     void FlushHeader();
-
     void WriteSigBook(const std::vector<std::string> *sigbook, bool write_timestamp = false);
-
     os::String AutogenTraceFileName();
 
-    bool                mIsOpen;
+    bool                mIsOpen = false;
     FILE*               mStream = nullptr;
-
-    char*               mCache;
-    int                 mCacheLen;
-    char*               mCacheP;
-    char*               mCompressedCache;
-    int                 mCompressedCacheLen;
-
+    char*               mCache = nullptr;
+    char*               mCacheP = nullptr;
+    char*               mCompressedCache = nullptr;
     std::string         mFileName;
 };
 

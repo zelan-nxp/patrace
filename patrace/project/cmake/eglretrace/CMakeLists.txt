@@ -66,7 +66,7 @@ target_link_libraries(paretrace
     jsoncpp
     hwcpipe
 )
-set_target_properties(paretrace PROPERTIES LINK_FLAGS "-pthread" COMPILE_FLAGS "-pthread")
+set_target_properties(paretrace PROPERTIES LINK_FLAGS "-pthread -z max-page-size=16384" COMPILE_FLAGS "-pthread")
 target_compile_options(paretrace PRIVATE ${SANITIZER})
 add_dependencies(paretrace
     retrace_gles_auto_src_generation
@@ -74,4 +74,4 @@ add_dependencies(paretrace
     glxml_header
 )
 
-install(TARGETS paretrace RUNTIME DESTINATION bin)
+install(TARGETS paretrace RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

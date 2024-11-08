@@ -11,7 +11,6 @@
 #include "retracer/config.hpp"
 
 #include "libcollector/interface.hpp"
-
 #include "helper/states.h"
 #include "helper/shadermod.hpp"
 
@@ -210,13 +209,13 @@ static void perfmon_list()
     FILE* pm_fp = fopen(perfmon_counters, "w");
     if (!pm_fp)
     {
-        DBG_LOG("Could not open file for writing perfmon counter list: %s\n", strerror(errno));
+        DBG_LOG("Could not open file %s for writing perfmon counter list: %s\n", perfmon_counters, strerror(errno));
         return;
     }
     fprintf(pm_fp, "Group Idx,Group ID,Counter Idx,CounterID,Group Name,Counter Name,Type\n");
     _glGetPerfMonitorGroupsAMD(NULL, numGroups, groups.data());
     bool ok = (_glGetError() == GL_NO_ERROR);
-    if (!ok) { DBG_LOG("list: Failed to enumerate groups\n"); }
+    if (!ok) { DBG_LOG("list: Failed to enumerate counter groups\n"); }
     for (int i = 0 ; ok && i < numGroups; i++)
     {
         GLint numCounters = 0;
@@ -253,10 +252,7 @@ static void amd_perf_init(const char *vendor)
     unsigned pm_current_group = 0;
     std::vector<GLuint> perfset;
     amd_perf_activated = false;
-    if (!isGlesExtensionSupported("GL_AMD_performance_monitor") && strncasecmp(vendor, "qualcomm", 8) != 0)
-    {
-        return;
-    }
+    if (!isGlesExtensionSupported("GL_AMD_performance_monitor")) return;
     perfmon_list();
     FILE* pm_fp = fopen(perfmon_settings, "r");
     if (pm_fp)
@@ -264,11 +260,11 @@ static void amd_perf_init(const char *vendor)
         int r = fscanf(pm_fp, "%u\n", &pm_current_group);
         if (r != 1)
         {
-            DBG_LOG("Failed to read perfmon.conf! No perf measurements for you :-(\n");
+            DBG_LOG("Failed to read perfmon.conf! Create this file to enable measurements using GL_AMD_performance_monitor\n");
             fclose(pm_fp);
             return;
         }
-        DBG_LOG("GL_AMD_performance_monitor activating for group %u and counters:", pm_current_group);
+        DBG_LOG("GL_AMD_performance_monitor will attempt to activate for counter group %u\n", pm_current_group);
         unsigned v = 0;
         do // read counter values
         {
@@ -324,7 +320,7 @@ static void amd_perf_init(const char *vendor)
     }
     _glSelectPerfMonitorCountersAMD(pm_monitor, GL_TRUE, groups[pm_current_group], perfset.size(), active_counters.data());
     ok = (_glGetError() == GL_NO_ERROR);
-    DBG_LOG("Enabling perf monitor for group %u: %s\n", groups[pm_current_group], ok ? "OK" : "FAILED");
+    DBG_LOG("Enabling perf monitor with %d counters for group %u: %s\n", (int)perfset.size(), groups[pm_current_group], ok ? "OK" : "FAILED");
     if (!ok)
     {
         DBG_LOG("Failed to enable perf monitor!\n");
@@ -469,6 +465,12 @@ bool Retracer::OpenTraceFile(const char* filename)
     if (!mFile.Open(filename))
         return false;
 
+    if (mOptions.mPatchPath.size() != 0)
+    {
+        if (!mFile.OpenPatchFile(mOptions.mPatchPath.c_str()))
+            return false;
+    }
+
     mFileFormatVersion = mFile.getHeaderVersion();
     mStateLogger.open(std::string(filename) + ".retracelog");
     loadRetraceOptionsFromHeader();
@@ -562,16 +564,18 @@ void Retracer::loadRetraceOptionsFromHeader()
     if (mOptions.mForceSingleWindow) DBG_LOG("Enabling force single window option\n");
     if (jsHeader.isMember("multiThread")) mOptions.mMultiThread = jsHeader.get("multiThread", false).asBool();
     if (mOptions.mMultiThread) DBG_LOG("Enabling multiple thread option\n");
+    if (jsHeader.isMember("translucentSurface")) mOptions.mTranslucentSurface = jsHeader.get("translucentSurface", false).asBool();
+    if (jsHeader.get("translucentSurface", false).asBool()) DBG_LOG("Enabling translucentSurface option from Json header\n");
     if (jsHeader.isMember("skipfence")) {
         std::vector<std::pair<unsigned int, unsigned int>> ranges;
-        for (auto ranges_itr : jsHeader["skipfence"])
+        for (const auto& ranges_itr : jsHeader["skipfence"])
         {
             ranges.push_back(std::make_pair(ranges_itr[0].asInt(), ranges_itr[1].asInt()));
         }
 
         if (ranges.size() == 0)
         {
-            gRetracer.reportAndAbort("Bad value for option -skipfence, must give at least one frame range.");
+            reportAndAbort("Bad value for option -skipfence, must give at least one frame range.");
         }
 
         std::sort(ranges.begin(), ranges.end());
@@ -1242,6 +1246,9 @@ void Retracer::RetraceThread(const int threadidx, const int our_tid)
     r.our_tid = our_tid;
     unsigned int skip_fence_range_index = 0;
 
+    std::string thread_name = "patrace-" + _to_string(our_tid);
+    set_thread_name(thread_name.c_str());
+
     while (!mFinish.load(std::memory_order_consume))
     {
         bool isSwapBuffers = swapvals.at(mCurCall.funcId);
@@ -1328,7 +1335,7 @@ void Retracer::RetraceThread(const int threadidx, const int our_tid)
                 PerfEnd();
             }
 
-            if (mOptions.mScriptFrame == (int)mCurFrameNo && mOptions.mScriptPath.size() > 0)  // trigger script at the begining of specific frame
+            if (mOptions.mScriptCallSet && (mOptions.mScriptCallSet->contains(mCurFrameNo, mFile.ExIdToName(mCurCall.funcId))) && mOptions.mScriptPath.size() > 0)  // trigger script at the begining of specific frame
             {
                 TriggerScript(mOptions.mScriptPath.c_str());
             }
@@ -1369,6 +1376,7 @@ void Retracer::RetraceThread(const int threadidx, const int our_tid)
                 const float fps = ((double)numOfFrames) / duration;
                 mLoopResults.push_back(fps);
                 mLoopBeginTime = os::getTime();
+                LoadBuffersMaps();
                 mLoopTimes++;
             }
         }
@@ -1472,8 +1480,9 @@ void Retracer::Retrace()
     syncvals[mFile.NameToExId("glWaitSync")] = true;
     syncvals[mFile.NameToExId("glClientWaitSync")] = true;
 
-    if (mOptions.mScriptFrame == 0 && mOptions.mScriptPath.size() > 0)
+    if (mOptions.mScriptCallSet && mOptions.mScriptCallSet->contains(0, "eglSwapBuffers") && mOptions.mScriptPath.size() > 0)
     {
+        // Trigger Script before frame 0
         TriggerScript(mOptions.mScriptPath.c_str());
     }
 
@@ -1563,6 +1572,37 @@ void Retracer::StartMeasuring()
     mEndFrameTime = mTimerBeginTime;
 }
 
+void Retracer::SaveBuffersMaps()
+{
+    Context& context = gRetracer.getCurrentContext();
+    for (const auto &pair : context.getBufferMap().GetCopy())
+    {
+        mBufferMapCheckpoint.insert(pair.first);
+    }
+
+    mCSBCheckpoint = mCSBuffers;
+}
+
+void Retracer::LoadBuffersMaps()
+{
+    if (mLoopTimes == 0)
+    {
+        Context& context = gRetracer.getCurrentContext();
+        auto tmpBufferMap = context.getBufferMap().GetCopy();
+        for (const auto &iter : tmpBufferMap)
+        {
+            if (mBufferMapCheckpoint.find(iter.first)==mBufferMapCheckpoint.end())
+            {
+                buffer_to_del.push_back(iter.first);
+            }
+        }
+    }
+    hardcode_glDeleteBuffers(buffer_to_del.size(), buffer_to_del.data());
+
+    mCSBuffers.clear();
+    mCSBuffers = mCSBCheckpoint;
+}
+
 void Retracer::OnNewFrame()
 {
     if (getCurTid() == mOptions.mRetraceTid || mOptions.mMultiThread)
@@ -1571,6 +1611,10 @@ void Retracer::OnNewFrame()
 
         if (mCurFrameNo == mOptions.mBeginMeasureFrame)
         {
+            if (mOptions.mLoopTimes>0 && mLoopTimes==0)
+            {
+                SaveBuffersMaps();
+            }
             if (mOptions.mFlushWork)
             {
                 // First try to flush all the work we can
@@ -1891,7 +1935,7 @@ void Retracer::saveResult(Json::Value& result)
     DBG_LOG("Saving results...\n");
     if (!TraceExecutor::writeData(result, numOfFrames, duration))
     {
-        reportAndAbort("Error writing result file!\n");
+        reportAndAbort("Error writing result file!");
     }
     mLoopResults.clear();
     TraceExecutor::clearResult();
@@ -2463,6 +2507,48 @@ void hardcode_glDeleteVertexArrays(int n, unsigned int* oldIds)
     }
 }
 
+void hardcode_glAssertBuffer_ARM(GLenum target, GLsizei offset, GLsizei size, const char* md5)
+{
+    const char *ptr = (const char *)glMapBufferRange(target, offset, size, GL_MAP_READ_BIT);
+    MD5Digest md5_bound_calc(ptr, size);
+    std::string md5_bound = md5_bound_calc.text();
+    glUnmapBuffer(target);
+    if (md5_bound != md5) gRetracer.reportAndAbort("glAssertBuffer_ARM: MD5 sums differ at call %d", (int)gRetracer.mFile.curCallNo);
+}
+
+void hardcode_glAssertFramebuffer_ARM(GLenum target, GLint colorAttachment, const char* md5)
+{
+    int readFboId = 0, drawFboId = 0;
+    _glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFboId);
+    _glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFboId);
+#if TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR
+    const unsigned int ON_SCREEN_FBO = 1;
+#else
+    const unsigned int ON_SCREEN_FBO = 0;
+#endif
+    if (gRetracer.mOptions.mForceOffscreen)
+    {
+        _glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ON_SCREEN_FBO);
+        gRetracer.mpOffscrMgr->BindOffscreenReadFBO();
+    }
+    else {
+        _glBindFramebuffer(GL_READ_FRAMEBUFFER, drawFboId);
+    }
+    image::Image *image = getDrawBufferImage(colorAttachment);
+    if (image == NULL) gRetracer.reportAndAbort("glAssertFramebuffer_ARM: Framebuffer unavailable!");
+    const MD5Digest md5_bound_calc(image->pixels, image->size());
+    if (md5_bound_calc.text() != md5) gRetracer.reportAndAbort("glAssertFramebuffer_ARM: MD5 sums differ at call %d", (int)gRetracer.mFile.curCallNo);
+#if 0
+    std::stringstream ss;
+    ss << "assertfb_" << std::setw(10) << std::setfill('0') << gRetracer.mFile.curCallNo << ".png";
+    std::string filenameToBeUsed = ss.str();
+    image->writePNG(filenameToBeUsed.c_str());
+#endif
+    delete image;
+    _glBindFramebuffer(GL_READ_FRAMEBUFFER, readFboId);
+    _glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFboId);
+}
+
 GLuint lookUpPolymorphic(GLuint name, GLenum target)
 {
     Context& context = gRetracer.getCurrentContext();
@@ -2472,6 +2558,65 @@ GLuint lookUpPolymorphic(GLuint name, GLenum target)
     }
     // otherwise, assume texture type
     return context.getTextureMap().RValue(name);
+}
+GLuint lookUpPolymorphic2(GLuint name, GLenum target)
+{
+    Context& context = gRetracer.getCurrentContext();
+    switch (target)
+    {
+    case  GL_BUFFER_OBJECT_EXT: return context.getBufferMap().RValue(name);
+    case  GL_SHADER_OBJECT_EXT: return context.getShaderMap().RValue(name);
+    case  GL_PROGRAM_OBJECT_EXT: return context.getProgramMap().RValue(name);
+    case  GL_VERTEX_ARRAY_OBJECT_EXT: return context._array_map.RValue(name);
+    case  GL_QUERY_OBJECT_EXT: return context._query_map.RValue(name);
+    case  GL_PROGRAM_PIPELINE_OBJECT_EXT: return context._pipeline_map.RValue(name);
+    case  GL_TEXTURE: return context.getTextureMap().RValue(name);
+    case  GL_FRAMEBUFFER: return context.getFramebufferMap().RValue(name);
+    case  GL_RENDERBUFFER: return context.getRenderbufferMap().RValue(name);
+    case  GL_SAMPLER: return context.getSamplerMap().RValue(name);
+    case  GL_TRANSFORM_FEEDBACK: return context._feedback_map.RValue(name);
+    default:
+        {DBG_LOG("Warning: failed type match for Label Object");
+        return name;}
+    }
+}
+GLuint lookUpPolymorphic3(GLuint name, GLenum target)
+{
+    Context& context = gRetracer.getCurrentContext();
+    switch (target)
+    {
+    case  GL_BUFFER: return context.getBufferMap().RValue(name);
+    case  GL_SHADER: return context.getShaderMap().RValue(name);
+    case  GL_PROGRAM: return context.getProgramMap().RValue(name);
+    case  GL_VERTEX_ARRAY: return context._array_map.RValue(name);
+    case  GL_QUERY: return context._query_map.RValue(name);
+    case  GL_PROGRAM_PIPELINE: return context._pipeline_map.RValue(name);
+    case  GL_TEXTURE: return context.getTextureMap().RValue(name);
+    case  GL_FRAMEBUFFER: return context.getFramebufferMap().RValue(name);
+    case  GL_RENDERBUFFER: return context.getRenderbufferMap().RValue(name);
+    case  GL_SAMPLER: return context.getSamplerMap().RValue(name);
+    case  GL_TRANSFORM_FEEDBACK: return context._feedback_map.RValue(name);
+    default:
+        {DBG_LOG("Warning: failed type match for Label Object");
+        return name;}
+    }
+}
+EGLObjectKHR lookUpPolymorphic4(int64_t object, EGLenum objectType)
+{
+    bool found_Image = false;
+    switch (objectType)
+    {
+    case  EGL_OBJECT_THREAD_KHR: return NULL;
+    case  EGL_OBJECT_DISPLAY_KHR: return gRetracer.mState.mEglDisplay;
+    case  EGL_OBJECT_CONTEXT_KHR: return gRetracer.mState.GetContext(object);
+    case  EGL_OBJECT_SURFACE_KHR: return gRetracer.mState.GetDrawable(object);
+    case  EGL_OBJECT_IMAGE_KHR: return gRetracer.mState.GetEGLImage(object, found_Image);
+    case  EGL_OBJECT_SYNC_KHR: return gRetracer.mState.mEGLSyncMap.RValue((unsigned long long)object);
+    case  EGL_OBJECT_STREAM_KHR: return (EGLObjectKHR)object;
+    default:
+        {DBG_LOG("Warning: failed type match for Label Object");
+        return (EGLObjectKHR)object;}
+    }
 }
 
 } /* namespace retracer */

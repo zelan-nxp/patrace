@@ -19,6 +19,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.TextureView;
 import android.graphics.SurfaceTexture;
+import android.graphics.PixelFormat;
 import android.view.WindowManager;
 import android.view.KeyEvent;
 import android.os.Handler;
@@ -276,6 +277,10 @@ public class RetraceActivity extends Activity
             height = h;
 
             SurfaceHolder holder = getHolder();
+            if(NativeAPI.translucent_surfaceView)
+            {
+                holder.setFormat(PixelFormat.TRANSLUCENT);
+            }
             holder.addCallback(this);
         }
 

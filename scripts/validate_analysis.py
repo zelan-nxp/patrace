@@ -59,8 +59,8 @@ if __name__ == '__main__':
             assert ctx in contexts
             del contexts[ctx]
 
-    assert(len(contexts) == 0)
-    assert(cmdcounts['eglSwapBuffers'] == base['frames'])
-    assert(base['gl_version'] == 3.2)
+    assert len(contexts) == 0
+    assert cmdcounts['eglSwapBuffers'] + cmdcounts.get('eglSwapBuffersWithDamageKHR', 0) == base['frames']
+    assert base['gl_version'] == 3.2
 
     sys.exit(0)

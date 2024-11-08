@@ -63,6 +63,10 @@ public:
     inline int getMaxSigId() const { return mMaxSigId; }
     inline const std::vector<std::string>& getFuncNames() const { return mExIdToName; }
 
+    std::vector<std::string> mExIdToName;
+    std::vector<int> mExIdToLen;
+    std::vector<void *> mExIdToFunc;
+
 protected:
     bool parseHeader(BHeaderV1 hdrV1, Json::Value &value);
     bool parseHeader(BHeaderV2 hdrV2, Json::Value &value);
@@ -78,9 +82,6 @@ protected:
     Json::Value mJsonHeader;
     bool mHeaderParseComplete = false;
     char *mDataPtr = nullptr;
-    std::vector<std::string> mExIdToName;
-    int *mExIdToLen = nullptr;
-    void **mExIdToFunc = nullptr;
 
     int mMaxSigId = -1;
     int mBeginFrame = -1;

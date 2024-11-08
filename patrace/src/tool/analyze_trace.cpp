@@ -181,7 +181,7 @@ static int count_uniform_values(common::CallTM* call)
     return count;
 }
 
-static int sum_map_range(std::map<int, int> &map)
+static int sum_map_range(const std::map<int, int> &map)
 {
     int val = 0;
     for (const auto pair : map)
@@ -191,7 +191,7 @@ static int sum_map_range(std::map<int, int> &map)
     return val;
 }
 
-static int sum_map(std::map<int, int> &map)
+static int sum_map(const std::map<int, int> &map)
 {
     return std::accumulate(map.cbegin(), map.cend(), 0, [](const int lhs, const std::pair<int ,int> &rhs) { return lhs + rhs.second; });
 }
@@ -380,7 +380,7 @@ static void write_CSV(const std::string& csv_filename, std::map<std::string, Per
             v.second.values.pop_back(); // remove last column as we only want actual draws
         }
         fs << v.second.csv_description;
-        for (auto& f : v.second.values)
+        for (const auto& f : v.second.values)
         {
             fs << "," << f;
         }
@@ -392,7 +392,7 @@ static void write_CSV(const std::string& csv_filename, std::map<std::string, Per
     fs.open(csv_filename + ".std.csv", std::fstream::out |  std::fstream::trunc);
     fs << "Index";
     int count = 0;
-    for (auto& v : map) // write out column headers
+    for (const auto& v : map) // write out column headers
     {
         fs << "," << v.second.csv_description;
         count = v.second.values.size();
@@ -401,7 +401,7 @@ static void write_CSV(const std::string& csv_filename, std::map<std::string, Per
     for (int item = 0; item < count; item++)
     {
         fs << item;
-        for (auto& v : map)
+        for (const auto& v : map)
         {
             fs << "," << v.second.values.at(item);
         }
@@ -540,7 +540,7 @@ static void write_callstats(const ParseInterfaceBase& input, const std::string& 
         return;
     }
     fprintf(fp, "Function,Count,Duplicates,%% dupes\n");
-    for (auto& pair : input.callstats)
+    for (const auto& pair : input.callstats)
     {
         fprintf(fp, "%s,%ld,%ld,%f\n", pair.first.c_str(), pair.second.count, pair.second.dupes, (double)pair.second.dupes / (double)pair.second.count);
     }
@@ -662,7 +662,7 @@ static bool callback(ParseInterfaceBase& input, common::CallTM *call, void *cust
         for (auto& c : az->contexts) // handle texture counting
         {
             // patrace defines 'frame' as any eglSwapBuffers on any context, so count all contexts
-            for (auto& t : c.textureIdUsed)
+            for (auto t : c.textureIdUsed)
             {
                 if (!relevant(input.frames) || !input.contexts[context_index].textures.contains(t)) continue;
                 const int texidx = input.contexts[context_index].textures.remap(t);
@@ -869,16 +869,16 @@ static bool callback(ParseInterfaceBase& input, common::CallTM *call, void *cust
     {
         const GLenum target = call->mArgs[0]->GetAsUInt();
         const GLuint fb = call->mArgs[1]->GetAsUInt();
-        bool valid;
+        bool valid = false;
         if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER)
         {
             az->contexts[context_index].drawframebuffer = fb;
             // Setting it to the same value as the old value does not count
-            valid = (input.contexts[context_index].drawframebuffer != input.contexts[context_index].prev_drawframebuffer);
+            if (input.contexts[context_index].drawframebuffer != input.contexts[context_index].prev_drawframebuffer) valid = true;
         }
-        else
+        if (target == GL_FRAMEBUFFER || target == GL_READ_FRAMEBUFFER)
         {
-            valid = (input.contexts[context_index].readframebuffer != input.contexts[context_index].prev_readframebuffer);
+            if (input.contexts[context_index].readframebuffer != input.contexts[context_index].prev_readframebuffer) valid = true;
         }
         if (fb != 0 && relevant(input.frames) && valid)
         {
@@ -1439,9 +1439,9 @@ void AnalyzeTrace::analyze(ParseInterfaceBase& input)
 
     input.loop(callback, this);
 
-    for (auto& c : input.contexts)
+    for (const auto& c : input.contexts)
     {
-        for (auto& p : c.programs.all())
+        for (const auto& p : c.programs)
         {
             if (!p.stats.drawcalls && !p.stats.dispatches)
             {
@@ -1480,7 +1480,7 @@ void AnalyzeTrace::analyze(ParseInterfaceBase& input)
         for (const auto& ctx : input.contexts)
         {
             if (ctx.share_context != 0) continue;
-            for (const auto& tx : ctx.textures.all())
+            for (const auto& tx : ctx.textures)
             {
                 for (const auto& mip : tx.mipmaps)
                 {
@@ -1497,7 +1497,7 @@ void AnalyzeTrace::analyze(ParseInterfaceBase& input)
         for (const auto& ctx : input.contexts)
         {
             if (ctx.share_context != 0) continue;
-            for (const auto& tx : ctx.textures.all())
+            for (const auto& tx : ctx.textures)
             {
                 if (!tx.used) fprintf(fp, "%d,%d,%d,%d,%d,%d\n", tx.created.call, tx.created.frame, tx.index, (int)tx.id, ctx.index, (int)ctx.id);
             }
@@ -1511,7 +1511,7 @@ void AnalyzeTrace::analyze(ParseInterfaceBase& input)
         for (const auto& ctx : input.contexts)
         {
             if (ctx.share_context != 0) continue;
-            for (const auto& buf : ctx.buffers.all())
+            for (const auto& buf : ctx.buffers)
             {
                 if (!buf.used) fprintf(fp, "%d,%d,%d,%d,%d,%d\n", buf.created.call, buf.created.frame, buf.index, (int)buf.id, ctx.index, (int)ctx.id);
             }
@@ -1525,7 +1525,7 @@ void AnalyzeTrace::analyze(ParseInterfaceBase& input)
         for (const auto& ctx : input.contexts)
         {
             if (ctx.share_context != 0) continue;
-            for (const auto& tx : ctx.textures.all())
+            for (const auto& tx : ctx.textures)
             {
                 if (tx.uninit_usage) fprintf(fp, "%d,%d,%d,%d,%d,%d\n", tx.created.call, tx.created.frame, tx.index, (int)tx.id, ctx.index, (int)ctx.id);
             }
@@ -1568,7 +1568,7 @@ double AnalyzeTrace::calculate_dump_heaviness(const ParseInterfaceBase& input, i
     long _dr = 0;
     for (const auto& c : input.contexts)
     {
-        for (const auto& p : c.programs.all())
+        for (const auto& p : c.programs)
         {
             _pr += p.stats.primitives;
             _dr += p.stats.drawcalls;
@@ -1597,7 +1597,7 @@ double AnalyzeTrace::calculate_heaviness(const ParseInterfaceBase& input, int fr
     long _dr = 0;
     for (const auto& c : input.contexts)
     {
-        for (const auto& p : c.programs.all())
+        for (const auto& p : c.programs)
         {
             if (p.stats_per_frame.count(frame) > 0)
             {
@@ -1636,7 +1636,7 @@ double AnalyzeTrace::calculate_complexity(const ParseInterfaceBase& input)
     int programs = 0;
     for (const auto& c : input.contexts)
     {
-        programs += c.programs.all().size();
+        programs += c.programs.size();
     }
     weights.push_back(ratio_with_cap(100, programs));
     weights.push_back(ratio_with_cap(10, texturetypes.size()));
@@ -1679,8 +1679,8 @@ static Json::Value json_fb(const StateTracker::Context& c, int idx, int frame)
     fb["uses"] = f.used;
     if (frame != -1)
     {
-        fb["duplicate_clears"] = f.duplicate_clears.at(frame);
-        fb["total_clears"] = f.total_clears.at(frame);
+        if (f.duplicate_clears.count(frame) > 0) fb["duplicate_clears"] = f.duplicate_clears.at(frame);
+        if (f.total_clears.count(frame) > 0) fb["total_clears"] = f.total_clears.at(frame);
     }
     fb["attachments"] = Json::arrayValue;
     for (const auto& pair : f.attachments)
@@ -1821,7 +1821,7 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
         result["depthfuncs"].append(texEnum(pair.first));
     }
     result["gl_version"] = ((float)input.highest_gles_version) / 10.0;
-    for (auto& c : input.contexts)
+    for (const auto& c : input.contexts)
     {
         Json::Value v = json_base(c);
         std::map<GLenum, long> used_texture_target_types;
@@ -1853,19 +1853,19 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
         v["used_renderbuffer_target_types"] = used_renderbuffer_target_typesv;
         v["display"] = c.display;
         v["share"] = c.share_context;
-        v["shaders"] = (int)c.shaders.all().size();
-        v["textures"] = (int)c.textures.all().size();
+        v["shaders"] = (int)c.shaders.size();
+        v["textures"] = (int)c.textures.size();
         v["compressed_textures"] = (int)contexts[c.index].compressed_textures;
         v["framebuffers"] = Json::arrayValue;
-        for (const auto& fb : c.framebuffers.all())
+        for (const auto& fb : c.framebuffers)
         {
             v["framebuffers"].append(json_fb(c, fb.index, -1));
         }
-        v["renderbuffers"] = (int)c.renderbuffers.all().size();
-        v["samplers"] = (int)c.samplers.all().size();
+        v["renderbuffers"] = (int)c.renderbuffers.size();
+        v["samplers"] = (int)c.samplers.size();
         v["buffers"] = Json::Value();
-        v["buffers"]["total"] = (int)c.buffers.all().size() - 1;
-        v["queries"] = (int)c.queries.all().size();
+        v["buffers"]["total"] = (int)c.buffers.size() - 1;
+        v["queries"] = (int)c.queries.size();
         v["draw_calls"] = sum_map(c.draw_calls_per_frame);
         v["flush_calls"] = sum_map(c.flush_calls_per_frame);
         v["finish_calls"] = sum_map(c.finish_calls_per_frame);
@@ -1891,7 +1891,7 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
         v["framerange"]["no_state_changed_draws"] = sum_map_range(c.no_state_changed_draws_per_frame);
         v["framerange"]["no_state_or_uniform_changed_draws"] = sum_map_range(c.no_state_or_uniform_changed_draws_per_frame);
         v["framerange"]["no_state_or_index_buffer_changed_draws"] = sum_map_range(c.no_state_or_index_buffer_changed_draws_per_frame);
-        v["transform_feedback_objects"] = (int)c.transform_feedbacks.all().size() - 1;
+        v["transform_feedback_objects"] = (int)c.transform_feedbacks.size() - 1;
         v["attribute_buffers"] = Json::arrayValue;
         std::map<std::tuple<GLenum, GLint, GLsizei>, GLsizei> buffer_combos;
         int attr_buffers = 0;
@@ -1900,7 +1900,7 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
         int index_buffers = 0;
         int mixed_buffers = 0;
         int other_buffers = 0;
-        for (const auto& buffer : c.buffers.all())
+        for (const auto& buffer : c.buffers)
         {
             bool index_buffer = false;
             bool attributes = false;
@@ -1950,7 +1950,7 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
             v["attribute_buffer_histogram"].append(tv);
         }
         v["programs"] = Json::arrayValue;
-        for (auto& p : c.programs.all())
+        for (const auto& p : c.programs)
         {
             if (p.stats.dispatches > 0 || p.stats.drawcalls > 0 || report_unused_shaders)
             {
@@ -1965,7 +1965,7 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
         result["header_empty_egl_rgb_config"] = true; // this is usuallly a sign of a bad header
     }
     result["surfaces"] = Json::arrayValue;
-    for (auto& s : surfaces)
+    for (const auto& s : surfaces)
     {
         Json::Value v = json_base(input.surfaces[s.index]);
         StateTracker::EglConfig& config = input.eglconfigs[input.surfaces[s.index].eglconfig];
@@ -1999,11 +1999,11 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
         case SURFACE_PIXMAP: v["type"] = "Pixmap"; break;
         case SURFACE_COUNT: assert(false); break;
         }
-        for (auto& c : s.threads_used)
+        for (const auto& c : s.threads_used)
         {
             v["threads"].append(c.first);
         }
-        for (auto& c : s.contexts_used)
+        for (const auto& c : s.contexts_used)
         {
             v["contexts"].append(c.first);
         }
@@ -2036,7 +2036,7 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
     result["framerange"]["absolute"]["draws"]["faceculled"] = faceculled;
     result["framerange"]["absolute"]["draws"]["indexed"] = indexed;
     result["framerange"]["absolute"]["draw_modes"] = Json::Value();
-    for (auto& d : drawtypes)
+    for (const auto& d : drawtypes)
     {
        result["framerange"]["absolute"]["draw_modes"][drawEnum(d.first)] = Json::Value();
        result["framerange"]["absolute"]["draw_modes"][drawEnum(d.first)]["calls"] = d.second;
@@ -2050,7 +2050,7 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
     }
 
     result["shaders"] = Json::arrayValue;
-    for (auto& s : shaders)
+    for (const auto& s : shaders)
     {
         Json::Value v;
         v["name"] = SafeEnumString(s.first);
@@ -2062,10 +2062,10 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
     addMapToJson(result, "texture_types", texturetypes);
     addMapToJson(result, "scissor_sizes", scissor_sizes);
     result["texture_type_filters"] = Json::Value();
-    for (auto& m : texturetypefilters)
+    for (const auto& m : texturetypefilters)
     {
         result["texture_type_filters"][m.first] = Json::arrayValue;
-        for (auto& n : m.second)
+        for (const auto& n : m.second)
         {
             Json::Value w;
             w["name"] = n.first;
@@ -2074,10 +2074,10 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
         }
     }
     result["texture_type_sizes"] = Json::Value();
-    for (auto& m : texturetypesizes)
+    for (const auto& m : texturetypesizes)
     {
         result["texture_type_sizes"][m.first] = Json::arrayValue;
-        for (auto& n : m.second)
+        for (const auto& n : m.second)
         {
             Json::Value w;
             w["name"] = n.first;
@@ -2086,7 +2086,7 @@ Json::Value AnalyzeTrace::trace_json(ParseInterfaceBase& input)
         }
     }
     result["blend_modes"] = Json::arrayValue;
-    for (auto& b : blendModes)
+    for (const auto& b : blendModes)
     {
         Json::Value v;
         v["mode"] = b.first.to_str();
@@ -2135,7 +2135,7 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
     result["dump_heaviness"] = heavinesses.at(frame);
     result["frame_heaviness"] = calculate_heaviness(input, frame);
     result["calls"] = calls_per_frame.at(frame);
-    for (auto& c : input.contexts)
+    for (const auto& c : input.contexts)
     {
         std::string digraph = "digraph frame_f" + std::to_string(frame) + " {\n";
         std::set<int> used_fbos; // by index
@@ -2149,7 +2149,7 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
         subresult["renderpasses"] = Json::arrayValue;
         std::set<int> used_textures_by_id;
         std::set<int> used_texture_targets_by_id;
-        for (auto& r : c.render_passes)
+        for (const auto& r : c.render_passes)
         {
             if (r.frame == frame)
             {
@@ -2161,7 +2161,7 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
                 v["framebuffer_id"] = r.drawframebuffer;
                 const GLuint fb_id = r.drawframebuffer;
                 const int fb_index = r.drawframebuffer_index;
-                StateTracker::Framebuffer& fb = c.framebuffers[fb_index];
+                const StateTracker::Framebuffer& fb = c.framebuffers.at(fb_index);
                 used_fbos.insert(fb_index);
                 if (!fb.label.empty())
                 {
@@ -2176,10 +2176,10 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
                 {
                     for (auto t : r.used_renderbuffers)
                     {
-                        assert(t < (int)c.renderbuffers.all().size());
-                        assert(c.renderbuffers[t].id != 0);
-                        list.append(c.renderbuffers[t].id);
-                        digraph += add_node("    fbo_", fb_id, "rb_", c.renderbuffers[t].id);
+                        assert(t < (int)c.renderbuffers.size());
+                        assert(c.renderbuffers.at(t).id != 0);
+                        list.append(c.renderbuffers.at(t).id);
+                        digraph += add_node("    fbo_", fb_id, "rb_", c.renderbuffers.at(t).id);
                         used_rbs.insert(t);
                     }
                 }
@@ -2190,21 +2190,21 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
                     Json::Value sizes = Json::arrayValue;
                     for (auto t : r.used_texture_targets)
                     {
-                        assert(t < (int)c.textures.all().size());
-                        assert(c.textures[t].id != 0);
-                        list.append(c.textures[t].id);
-                        formats.append(texEnum(c.textures[t].internal_format));
-                        sizes.append(std::to_string(c.textures[t].width) + "x" + std::to_string(c.textures[t].height));
-                        digraph += add_node("    fbo_", fb_id, "tex_", c.textures[t].id);
+                        assert(t < (int)c.textures.size());
+                        assert(c.textures.at(t).id != 0);
+                        list.append(c.textures.at(t).id);
+                        formats.append(texEnum(c.textures.at(t).internal_format));
+                        sizes.append(std::to_string(c.textures.at(t).width) + "x" + std::to_string(c.textures.at(t).height));
+                        digraph += add_node("    fbo_", fb_id, "tex_", c.textures.at(t).id);
                         used_texs.insert(t);
-                        used_textures_by_id.insert(c.textures[t].id);
-                        used_texture_targets_by_id.insert(c.textures[t].id);
+                        used_textures_by_id.insert(c.textures.at(t).id);
+                        used_texture_targets_by_id.insert(c.textures.at(t).id);
                     }
                 }
                 if (textures_by_renderpass[r.unique_index].size() > 0)
                 {
                     list = Json::arrayValue;
-                    for (auto& id : textures_by_renderpass[r.unique_index])
+                    for (auto id : textures_by_renderpass[r.unique_index])
                     {
                         assert(id != 0);
                         list.append(id);
@@ -2222,23 +2222,23 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
                 {
                     list = Json::arrayValue;
                     std::set<int> vertexset; // by id
-                    for (const auto t : r.used_programs)
+                    for (auto t : r.used_programs)
                     {
-                        assert(t < (int)c.programs.all().size());
-                        assert(c.programs[t].id != 0);
-                        list.append(c.programs[t].id);
-                        for (const auto s : c.programs[t].shaders)
+                        assert(t < (int)c.programs.size());
+                        assert(c.programs.at(t).id != 0);
+                        list.append(c.programs.at(t).id);
+                        for (const auto s : c.programs.at(t).shaders)
                         {
                             if (s.first == GL_VERTEX_SHADER)
                             {
-                                const StateTracker::Shader& shader = c.shaders[s.second];
+                                const StateTracker::Shader& shader = c.shaders.at(s.second);
                                 vertexset.insert(shader.id);
                             }
                         }
-                        if (c.programs[t].shaders.count(GL_COMPUTE_SHADER) > 0)
+                        if (c.programs.at(t).shaders.count(GL_COMPUTE_SHADER) > 0)
                         {
-                            digraph += add_node("    fbo_", fb_id, "compute_", c.programs[t].id);
-                            digraph += "    compute_" + std::to_string(c.programs[t].id) + " [shape=doubleoctagon];\n";
+                            digraph += add_node("    fbo_", fb_id, "compute_", c.programs.at(t).id);
+                            digraph += "    compute_" + std::to_string(c.programs.at(t).id) + " [shape=doubleoctagon];\n";
                         }
                         used_programs.insert(t);
                     }
@@ -2283,7 +2283,7 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
                 subresult["renderpasses"].append(v);
             }
         }
-        for (auto& r : c.textures.all())
+        for (const auto& r : c.textures)
         {
             if (used_textures_by_id.count(r.index) > 0)
             {
@@ -2307,16 +2307,16 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
                 subresult["textures"].append(tex);
             }
         }
-        for (auto& r : c.programs.all())
+        for (const auto& r : c.programs)
         {
             if (used_programs.count(r.index) == 0)
             {
                 continue;
             }
             Json::Value program = json_program(c, r, frame);
-            for (auto& s : r.shaders) // type : index pairs
+            for (const auto& s : r.shaders) // type : index pairs
             {
-                const StateTracker::Shader& shader = c.shaders[s.second];
+                const StateTracker::Shader& shader = c.shaders.at(s.second);
                 if (!write_used_shaders)
                 {
                     continue;
@@ -2348,27 +2348,27 @@ Json::Value AnalyzeTrace::frame_json(ParseInterfaceBase& input, int frame)
         }
         for (const GLuint idx : used_fbos)
         {
-            frame_clears += c.framebuffers[idx].total_clears[frame];
-            frame_dupes += c.framebuffers[idx].duplicate_clears[frame];
-            GLuint id = c.framebuffers[idx].id;
+            if (c.framebuffers.at(idx).total_clears.count(frame) > 0) frame_clears += c.framebuffers.at(idx).total_clears.at(frame);
+            if (c.framebuffers.at(idx).duplicate_clears.count(frame) > 0) frame_dupes += c.framebuffers.at(idx).duplicate_clears.at(frame);
+            GLuint id = c.framebuffers.at(idx).id;
             digraph += "    fbo_" + std::to_string(id) + " [label=\"FBO " + std::to_string(id) + "\"];\n";
             subresult["framebuffers"].append(json_fb(c, idx, frame));
         }
         for (const GLuint idx : used_rbs)
         {
-            Json::Value rb = json_base(c.renderbuffers[idx]);
-            GLuint id = c.renderbuffers[idx].id;
+            Json::Value rb = json_base(c.renderbuffers.at(idx));
+            GLuint id = c.renderbuffers.at(idx).id;
             digraph += "    rb_" + std::to_string(id) + " [shape=Mrecord, label=\"{Renderbuffer " + std::to_string(id) + "|";
-            digraph += texEnum(c.renderbuffers[idx].internalformat) + "}|{" + std::to_string(c.renderbuffers[idx].samples) + "|";
-            digraph += dim2str(c.renderbuffers[idx].width, c.renderbuffers[idx].height, 1) + "}\"];\n";
+            digraph += texEnum(c.renderbuffers.at(idx).internalformat) + "}|{" + std::to_string(c.renderbuffers.at(idx).samples) + "|";
+            digraph += dim2str(c.renderbuffers.at(idx).width, c.renderbuffers.at(idx).height, 1) + "}\"];\n";
             subresult["renderbuffers"].append(rb);
         }
         for (const GLuint idx : used_texs)
         {
-            GLuint id = c.textures[idx].id;
+            GLuint id = c.textures.at(idx).id;
             digraph += "    tex_" + std::to_string(id) + " [shape=record, label=\"{Texture " + std::to_string(id) + "|";
-            digraph += texEnum(c.textures[idx].internal_format) + "}|{" + texEnum(c.textures[idx].binding_point) + "|";
-            digraph += dim2str(c.textures[idx].width, c.textures[idx].height, c.textures[idx].depth) + "}\"];\n";
+            digraph += texEnum(c.textures.at(idx).internal_format) + "}|{" + texEnum(c.textures.at(idx).binding_point) + "|";
+            digraph += dim2str(c.textures.at(idx).width, c.textures.at(idx).height, c.textures.at(idx).depth) + "}\"];\n";
         }
         if (c.render_passes.size() > 0)
         {

@@ -447,6 +447,65 @@ Then, find which directory to place the GLES layer by running `adb logcat | grep
 Create the output trace directory in advance, which will be named `/data/apitrace/<package_name>`. Give it 777 permission, and run `chcon u:object_r:app_data_file:s0:c512,c768 /data/apitrace/<package_name>`
 After that, run the application and tracing will begin automatically.
 
+### Tracing Surfaceflinger on Android
+#### prerequisite
+You should have a rooted device and be able to run "setenforce 0". Of course, the above common conditions for tracing on Android should be met.
+#### GLES layer
+The most steps are as the same as tracing normal apps. But surfaceflinger can not be recongnized even if set as gpu_debug_app. As a result, we need to enable gles layer globally by:
+```
+adb shell setprop debug.gles.layers libGLES_layer_arm64.so.
+```
+Following are a example of the complete process:
+```
+adb root
+adb shell setenforce 0
+adb shell mkdir -p "/data/local/debug/gles"
+adb push libGLES_layer_arm64.so "/data/local/debug/gles"
+adb shell chmod 777 /data/local/debug/gles/libGLES_layer_arm64.so
+
+adb shell setprop debug.gles.layers libGLES_layer_arm64.so
+
+adb shell mkdir -p /data/apitrace/system/bin/surfaceflinger/system/bin/
+adb shell chmod -R 777 /data/apitrace
+
+# restart surfaceflinger
+adb shell stop
+adb shell start
+
+# Finishing trace
+# adb shell pidof surfaceflinger
+# adb shell kill -9 <pid>
+```
+#### Fakedriver
+For fakedriver, it will have as the same procedure as tracing normal apps. It is noteworthy that the name in appList.cfg should be set using the full path.
+Following are a example of the complete process:
+```
+adb root
+adb shell setenforce 0
+adb shell mount -o rw,remount /vendor
+
+adb push fakedriver/libGLES_wrapper_arm64.so /vendor/lib64/egl/libGLES_wrapper_arm64.so
+adb shell chmod 755 /vendor/lib64/egl/libGLES_wrapper_arm64.so
+
+adb push egltrace/libinterceptor_patrace_arm64.so /vendor/lib64/egl/libinterceptor_patrace_arm64.so
+adb shell chmod 755 /vendor/lib64/egl/libinterceptor_patrace_arm64.so
+adb shell "echo \"/vendor/lib64/egl/libinterceptor_patrace_arm64.so\" > /vendor/lib64/egl/interceptor.cfg"
+adb shell chmod 644 /vendor/lib64/egl/interceptor.cfg
+
+adb shell mkdir -p /data/apitrace/system/bin/surfaceflinger/system/bin/
+adb shell chmod -R 777 /data/apitrace
+
+adb shell "echo \"/system/bin/surfaceflinger\" > /vendor/lib64/egl/appList.cfg"
+adb shell chmod 644 /vendor/lib64/egl/appList.cfg
+
+# restart surfaceflinger
+adb shell stop
+adb shell start
+
+# adb shell pidof surfaceflinger
+# adb shell kill <pid>
+```
+
 Retracing
 ---------
 
@@ -530,8 +589,8 @@ There are three different ways to tell the retracer which parameters that should
 | Parameter                                    | Description                                                                                                                                                                                                                            |
 |----------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `-tid THREADID`                              | only the function calls invoked by the given thread ID will be retraced                                                                                                                                                                |
-| `-s CALL_SET`                                | take snapshot for the calls in the specific call set. Example `*/frame` for one snapshot for each frame, or `250/frame` to take a snapshot just of frame 250.                                                                          |
-| `-step`                                      | For desktop Linux, use F1-F4 to step forward frame by frame, F5-F8 to step forward draw call by draw call. For Linux fbdev, press H to see detailed usage.                                                                                                               |
+| `-s CALL_SET`                                | take snapshot on the specific call set. CALL_SET is defined at the end of table. Example: `*/frame` to take snapshot for each frame, `250/frame` for frame 250, `1-3/frame` for frame from 1 to 3. For multiple distinct ranges, callset could use the comma delimiter: `1-3/frame,250/frame`. |
+| `-step`                                      | For desktop Linux, use F1-F4 to step forward frame by frame, F5-F8 to step forward draw call by draw call. For Linux fbdev, press H to see detailed usage.                                                                             |
 | `-ores W H`                                  | override the resolution of the final onscreen rendering (FBOs used in earlier renderpasses are not affected!) |
 | `-msaa SAMPLES`                              | Enable multi sample anti alias for the final framebuffer |
 | `-overrideMSAA SAMPLES`                      | Override any existing MSAA settings for intermediate framebuffers that already use MSAA. |
@@ -568,7 +627,7 @@ There are three different ways to tell the retracer which parameters that should
 | `-perfevent event`                           | (since r4p3) Capture custom event |
 | `-perfcmd "customized perf params input"`    | (since r5p1) Input all perf params in one option. Default value for --pid and --freq=1000 |
 | `-fpslimit FPS`                              | (since r5p1) Limit the fps of replaying |
-| `-script scriptPath Frame`                   | (since r3p3) trigger script on the specific frame                                                                                                                                                                                      |
+| `-script scriptpath scriptCallset`           | (since r5p3) trigger script on the specific frames. Callset could be like `*/frame` or `30-50/frame` or `1/frame`. For multiple distinct ranges, callset could use the comma delimiter: `1/frame,10/frame,30-50/frame` .               |
 | `-noscreen`                                  | (since r2p4) Render without visual output using a pbuffer render target. This can be significantly slower, but will work on some setups where trying to render to a visual output target will not work.                                |
 | `-flush`                                     | (since r2p5) Will try hard to flush all pending CPU and GPU work before starting the selected framerange. This should usually not be necessary.                                                                                        |
 | `-flushonswap`                               | (since r2p15) Will try hard to flush all pending CPU and GPU work before starting the next frame. This should usually not be necessary. |
@@ -581,8 +640,10 @@ There are three different ways to tell the retracer which parameters that should
 | `-savecache prefix`                          | (since r4p2) Save shaders as binaries to a shader cache. Will add .bin and .idx to the given name. |
 | `-loadcache prefix`                          | (since r4p2) Load binary shaders from an existing shader cache created with -savecache. Will add .bin and .idx to the given name. |
 | `-cacheonly`                                 | (since r4p2) Skip any calls not needed for populating a shader cache. Can only be used with -savecache. |
+| `-intervalswap`    | Set swap interval to 0 for each context to make sure vsync is shut down. |
 
-    CALL_SET = interval ( '/' frequency )
+    CALL_SET = range (',' ? range)*
+    range = interval ( '/' frequency )
     interval = '*' | number | start_number '-' end_number
     frequency = divisor | "frame" | "draw"
 
@@ -597,7 +658,7 @@ There are three different ways to tell the retracer which parameters that should
 | `--ez forceOffscreen`      | true/false. When enabled, 100 frames will be rendered per visible frame, and rendering is no longer vsync limited. Frames are visible as 10x10 tiles.                                                                                                                                                                                                                        |
 | `--ez offscreenSingleTile` | true/false. Draw only one frame for each buffer swap in offscreen mode.                                                                                                                                                                                                                                                                                                      |
 | `--es snapshotPrefix`      | /path/to/snapshots/prefix- Must contain full path and a prefix, resulting screenshots will be named prefix-callnumber.png                                                                                                                                                                                                                                                    |
-| `--es snapshotCallset`     | call begin - call end / frequency, example: '10-100/draw' or '10-100/frame' or '10-100' (snapshot after every call in range!)                                                                                                                                                                                                                                                |
+| `--es snapshotCallset`     | call begin - call end / frequency, example: `10-100/frame` or `200/frame` or `10-100/frame,200/frame` or `10-100` (snapshot after every call in range!)                                                                                                                                                                                                                      |
 | `--ei frame_start`         | Start measure fps from this frame. The default framerange starts at 1.                                                                                                                                                                                                                                                                                                       |
 | `--ei frame_end`           | Stop fps measure, and stop playback                                                                                                                                                                                                                                                                                                                                          |
 | `--ei instrumentationDelay`           | Delay in microseconds that the retracer should sleep for after each present call in the measurement range.                                                                                                                                                                                                                                                                                                                                          |
@@ -607,6 +668,8 @@ There are three different ways to tell the retracer which parameters that should
 | `--es skipfence`           | start-end,start-end. Skip some fence waits calls(eglClientWaitSync, eglWaitSync, eglClientWaitSyncKHR, eglWaitSyncKHR, glWaitSync, glClientWaitSync) when within the measurement frame range.                                                                                                                                                                                                                                                                                                               |
 | `--ez callstats`           | true/false(default)  Output GLES API call statistics to callstats.csv under /sdcard for Android, or under the current dir, time spent in API calls measured in nanoseconds.                                                                                                                                                                                                  |
 | `--ei singlesurface`       | SURFACE. (since r3p0) Render all surfaces except the given one to pbuffer render target.                                                                                                                                                                                                                                                                                     |
+| `--es scriptpath`          | The script file with path to be executed                                           |
+| `--es scriptcallset`       | The frame ranges where script to execute. Callset could be like `*/frame` or `1/frame` or `30-50/frame` or `1/frame,10/frame,30-50/frame` .   |
 | `--ei perfstart`           | Start perf record from this frame. Frame number must be 1 or higher.  |
 | `--ei perfend`             | Stop perf record and save perf data. Frame number must be greater than `perfstart` frame  |
 | `--es perfpath`            | Path to your perf binary. The default is `/system/bin/simpleperf`   |
@@ -617,11 +680,12 @@ There are three different ways to tell the retracer which parameters that should
 | `--ei fpslimit`            | FPS. (since r5p1) Limit the fps of replaying.  |
 | `--ez noscreen`            | true/false(default). Render without visual output using a pbuffer render target. This can be significantly slower, but will work on some setups where trying to render to a visual output target will not work.                                                                                                                                                              |
 | `--ez finishBeforeSwap`    | True/False(default). Will try hard to flush all pending CPU and GPU work before starting the next frame. This should usually not be necessary.                                                                                                                                                                                                                               |
+| `--ez intervalswap`    | True/False(default). Set swap interval to 0 for each context to make sure vsync is shut down.      |
 | `--ez flushWork`           | True/False(default). Will try hard to flush all pending CPU and GPU work before starting the selected framerange. This should usually not be necessary.                                                                                                                                                                                                                      |
 | `--ez preload`             | True/False(default) Loads calls for frames between `frame_start` and `frame_end` into memory. Useful when playback is IO-bound.                                                                                                                                                                                                                                              |
 |                            | The following options may be used to override onscreen EGL config stored in trace header.                                                                                                                                                                                                                                                                                    |
 | `--ei colorBitsRed`        | bits                                                                                                                                                                                                                                                                                                                                                                         |
-| `--ei colorBitsGreen`      | bits                                                                                                                                                                                                                                                                                                                                                                         |
+| `--ei colorBitsGreen` want to     | bits                                                                                                                                                                                                                                                                                                                                                                         |
 | `--ei colorBitsBlue`       | bits                                                                                                                                                                                                                                                                                                                                                                         |
 | `--ei colorBitsAlpha`      | bits                                                                                                                                                                                                                                                                                                                                                                         |
 | `--ei depthBits`           | bits                                                                                                                                                                                                                                                                                                                                                                         |
@@ -678,8 +742,8 @@ A JSON file can be passed to the retracer via the -jsonParameters option. In thi
 | perfevent                    | string     | yes      | Event you want to capture.   |
 | perfcmd                      | string     | yes      | All perf params. Default value for pid and frequency=1000            |
 | instrumentationDelay         | int        | yes      | Delay in microseconds that the retracer should sleep for after each present call in the measurement range. |
-| scriptpath                   | string     | yes      | (since r3p3) The script file with path to be executed.           |
-| scriptframe                  | int        | yes      | (since r3p3) The frame number when script begin to execute.      |
+| scriptpath                   | string     | yes      | (since r5p3) The script file with path to be executed.           |
+| scriptcallset                | string     | yes      | (since r5p3) The frame ranges where script to execute. Callset could be like `*/frame` or `1/frame` or `30-50/frame` or `1/frame,30-50/frame` .       |
 | landscape                    | boolean    | yes      | Override the orientation                                                                                                                                                                                                               |
 | offscreen                    | boolean    | yes      | Render the trace offscreen                                                                                                                                                                                                             |
 | noscreen                     | boolean    | yes      | Render without visual output using a pbuffer render target. This can be significantly slower, but will work on some setups where trying to render to a visual output target will not work.                             |
@@ -688,7 +752,7 @@ A JSON file can be passed to the retracer via the -jsonParameters option. In thi
 | overrideWidth                | int        | yes      | Override width in pixels                                                                                                                                                                                                               |
 | preload                      | boolean    | yes      | Preloads the trace                                                                                                                                                                                                                     |
 | runAllCalls                  | boolean    | yes      | (since r4p0) Run all calls even those with no side-effects. This is useful for CPU load measurements. |
-| snapshotCallset              | string     | yes      | call begin - call end / frequency, example: '10-100/draw' or '10-100/frame' (snapshot after every call in range!). The snapshot is saved under the current directory by default.                                                       |
+| snapshotCallset              | string     | yes      | call begin - call end / frequency, example: `1/frame` or `10-100/frame` or `1/frame,10-100/frame` or `10-100` (snapshot after every call in range!). The snapshot is saved under the current directory by default.                                              |
 | snapshotPrefix               | string     | yes      | Contain a path and a prefix, resulting screenshots will be named prefix-callnumber.png                                                                                                                                                |
 | skipfence                    | string     | yes      | Skip some fence waits calls(eglClientWaitSync, eglWaitSync, eglClientWaitSyncKHR, eglWaitSyncKHR, glWaitSync, glClientWaitSync) when within the measurement frame range.                                                                                            |
 | removeUnusedVertexAttributes | boolean    | yes      | Modify the shader in runtime by removing attributes that were not enabled during tracing. When this is enabled, 'storeProgramInformation' is automatically turned on.                                                                  |
@@ -710,6 +774,7 @@ A JSON file can be passed to the retracer via the -jsonParameters option. In thi
 | cacheOnly                    | boolean    | yes      | (since r4p2) See 'cacheonly' command line option above. |
 | step                    | boolean    | yes      | (since r4p3) See 'step' option above for desktop Linux and Android.Press H to see detailed usage on uDriver and fbdev. |
 | fpslimit                     | int        | yes      | (since r5p1) Limit the fps of replaying. |
+| intervalswap | boolean | yes | Set swap interval to 0 for each context to make sure vsync is shut down.  |
 
 This is an example of a JSON parameter file:
 
@@ -777,8 +842,12 @@ On Android, you can set parameter of fastforward by ADB shell or a JSON file.
 | --ez norestoretex          | yes      | When generating a fastforward trace, don't inject commands to restore the contents of textures to what the would've been when retracing the original. (NOTE: NOT RECOMMEND)                                                                                                                                                                            |
 | --ez version               | yes      | Output the version of this program                                                                                                                                                                                                                                                                                                                                                     |
 | --ei restorefbo0           | yes      | Repeat to inject a draw call commands and swapbuffer the given number of times to restore the last default FBO. Suggest repeating 3~4 times if set DamageRegionKHR, else repeating 1 time.                                                                                                                                                                                 |
-| --ez shu                   | yes      | Remove the unused shader related function calls                                                                                                                                                                                                                                                                                                                                                       |
-| --ez txu                   | yes      | Remove the unused textures, buffers and related function calls                                                                                                                                                                                                                                                                                                                                             |
+| --es jsonData              | yes      | Path to a JSON file containing parameters, e.g. /data/apitrace/input.json.                                                                                                                                                                                                                                                                                                 |
+| --ez removeUnusedShader    | yes      | true(default)/false. Remove the unused shader and program related function calls.                                                                                                                                                                                                                                                                                                                                                |
+| --ez removeUnusedMipmap    | yes      | true(default)/false. Remove the unused GenMipmap calls.                                                                                                                                                                                                                                                                                                                                                                          |
+| --ez removeUnusedBuffer    | yes      | true(default)/false. Remove the unused buffer related function calls.                                                                                                                                                                                                                                                                                                                                                            |
+| --ez norestoreUnusedBuffer | yes      | true(default)/false. Don't inject commands to restore the data for unused buffers.                                                                                                                                                                                                                                                                                                                                               |
+| --ez removeBufferSubData   | yes      | true(default)/false. Remove the BufferSubData calls in initial frame since buffer will be restored just before the targetFrame.                                                                                                                                                                                                                                                                                                  |
 
 #### Example of a JSON file
 
@@ -787,12 +856,9 @@ On Android, you can set parameter of fastforward by ADB shell or a JSON file.
         "output": "data/example_trace_ff.pat",
         "targetFrame": 1000,
         "endFrame": 1100,
-        "multithread": false,
-        "offscreen": false,
-        "noscreen": false,
         "norestoretex": false,
         "restorefbo0": 0
-        "txu": false
+        "removeUnusedShader": true
     }
 
 Other
@@ -1030,6 +1096,7 @@ Event option of perf collector can be configured with the following json options
 | excludeUser                  | boolean    | yes      | true/false(default). If this is true, the count excludes events that happens in user space.                                                                                                                                                                                      |
 | excludeKernel                | boolean    | yes      | true/false(default). If this is true, the count excludes events that happens in kernel space.                                                                                                                                                                                    |
 | counterLen64bit              | int        | yes      | 1/0(default). 0 means using 32bit counters, 1 means using 64bit counters.                                                                                                                                                                                                        |
+| device                      | string     | yes      |  only used for dynamic PMU devices, such as D9000. When "device" is set, "type" will not work.(See example for dynamic PMU devices below)                                                                                                                                                                                                   |
 
 
 Example with perf collector
@@ -1060,6 +1127,83 @@ perf collector should be added as keys under the "collectors" dictionary in inpu
         "file": "driver2.orig.gles3.pat",
         "frames": "1-191",
         "preload": true
+    }
+
+
+Example with perf collector for dynamic PMU devices(eg. D9000)
+------------------------------
+
+Used for dynamic PMU, which menas the CPU cores have differnent PMUs. "device" could be get from /sys/devices/ on device. When "device" is set, no need to set "type".
+
+    {
+        "collectors": {
+            "perf": {
+                "set": 4,
+                "event": [{
+                        "name": "CPUCyclesUserCore7",
+                        "device": "armv9_cortex_x2",
+                        "config": 17,
+                        "excludeKernel": true
+                    },
+                    {
+                        "name": "CPUCyclesKernelCore7",
+                        "device": "armv9_cortex_x2",
+                        "config": 17,
+                        "excludeUser": true
+                    },
+                    {
+                        "name": "CPUInstructionRetiredCore7",
+                        "device": "armv9_cortex_x2",
+                        "config": 8
+                    },
+                    {
+                        "name": "CPUInstructionRetiredUserCore7",
+                        "device": "armv9_cortex_x2",
+                        "config": 8,
+                        "excludeKernel": true
+                    },
+                    {
+                        "name": "CPUInstructionRetiredKernelCore7",
+                        "device": "armv9_cortex_x2",
+                        "config": 8,
+                        "excludeUser": true
+                    },
+                    {
+                        "name": "CPUCyclesUserCore0-6",
+                        "device": "armv8_pmuv3",
+                        "config": 17,
+                        "excludeKernel": true
+                    },
+                    {
+                        "name": "CPUCyclesKernelCore0-6",
+                        "device": "armv8_pmuv3",
+                        "config": 17,
+                        "excludeUser": true
+                    },
+                    {
+                        "name": "CPUInstructionRetiredCore0-6",
+                        "device": "armv8_pmuv3",
+                        "config": 8
+                    },
+                    {
+                        "name": "CPUInstructionRetiredUserCore0-6",
+                        "device": "armv8_pmuv3",
+                        "config": 8,
+                        "excludeKernel": true
+                    },
+                    {
+                        "name": "CPUInstructionRetiredKernelCore0-6",
+                        "device": "armv8_pmuv3",
+                        "config": 8,
+                        "excludeUser": true
+                    }
+                ],
+                "allthread": true
+            }
+        },
+        "file": "/path/to/traces/filename.pat",
+        "preload": true,
+        "frames": "2-619"
     }
 
 

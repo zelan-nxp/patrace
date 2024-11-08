@@ -49,12 +49,21 @@ public class FastforwardActivity extends Activity {
             boolean norestoretex = receivedIntent.getBooleanExtra("norestoretex", false);
             boolean version = receivedIntent.getBooleanExtra("version", false);
             int restorefbo0 = receivedIntent.getIntExtra("restorefbo0", -1);
-            boolean txu = receivedIntent.getBooleanExtra("txu", false);
-            boolean shu = receivedIntent.getBooleanExtra("shu", false);
+            boolean shu = receivedIntent.getBooleanExtra("removeUnusedShader", true);
+            boolean mipu = receivedIntent.getBooleanExtra("removeUnusedMipmap", true);
+            boolean bfu = receivedIntent.getBooleanExtra("removeUnusedBuffer", true);
+            boolean nsbfu = receivedIntent.getBooleanExtra("norestoreUnusedBuffer", true);
+            boolean bfsd = receivedIntent.getBooleanExtra("removeBufferSubData", true);
+            boolean txu = receivedIntent.getBooleanExtra("removeUnusedtex", false);
+            boolean nstxu = receivedIntent.getBooleanExtra("norestoreUnusedtex", false);
+            boolean txsi = receivedIntent.getBooleanExtra("removeTexSubImage", false);
+            boolean cpimg = receivedIntent.getBooleanExtra("removeCopyImage", false);
+            boolean bfmp = receivedIntent.getBooleanExtra("removeBufferMap", false);
+
 
             // init with json parameters
-            if (receivedIntent.hasExtra("jsonParam")) {
-                String json_path = receivedIntent.getStringExtra("jsonParam");
+            if (receivedIntent.hasExtra("jsonData")) {
+                String json_path = receivedIntent.getStringExtra("jsonData");
                 Log.i(TAG, "json_path: " + json_path);
                 String json_data = new String();
 
@@ -71,7 +80,7 @@ public class FastforwardActivity extends Activity {
                         json_data = total.toString();
                         Log.i(TAG, "json_data: " + json_data);
                         JSONObject json_Param = new JSONObject(json_data);
-                        // intent has higher priority than jsonParam
+                        // intent has higher priority than jsonData
                         if (!receivedIntent.hasExtra("input") && json_Param.has("input")) {
                             input = json_Param.getString("input");
                         }
@@ -99,11 +108,35 @@ public class FastforwardActivity extends Activity {
                         if (!receivedIntent.hasExtra("restorefbo0") && json_Param.has("restorefbo0")) {
                             restorefbo0 = json_Param.getInt("restorefbo0");
                         }
-                        if (!receivedIntent.hasExtra("txu") && json_Param.has("txu")) {
-                            txu = json_Param.getBoolean("txu");
+                        if (!receivedIntent.hasExtra("removeUnusedShader") && json_Param.has("removeUnusedShader")) {
+                            shu = json_Param.getBoolean("removeUnusedShader");
                         }
-                        if (!receivedIntent.hasExtra("shu") && json_Param.has("shu")) {
-                            shu = json_Param.getBoolean("shu");
+                        if (!receivedIntent.hasExtra("removeUnusedMipmap") && json_Param.has("removeUnusedMipmap")) {
+                            mipu = json_Param.getBoolean("removeUnusedMipmap");
+                        }
+                        if (!receivedIntent.hasExtra("removeUnusedBuffer") && json_Param.has("removeUnusedBuffer")) {
+                            bfu = json_Param.getBoolean("removeUnusedBuffer");
+                        }
+                        if (!receivedIntent.hasExtra("norestoreUnusedBuffer") && json_Param.has("norestoreUnusedBuffer")) {
+                            nsbfu = json_Param.getBoolean("norestoreUnusedBuffer");
+                        }
+                        if (!receivedIntent.hasExtra("removeBufferSubData") && json_Param.has("removeBufferSubData")) {
+                            bfsd = json_Param.getBoolean("removeBufferSubData");
+                        }
+                        if (!receivedIntent.hasExtra("removeUnusedtex") && json_Param.has("removeUnusedtex")) {
+                            txu = json_Param.getBoolean("removeUnusedtex");
+                        }
+                        if (!receivedIntent.hasExtra("norestoreUnusedtex") && json_Param.has("norestoreUnusedtex")) {
+                            nstxu = json_Param.getBoolean("norestoreUnusedtex");
+                        }
+                        if (!receivedIntent.hasExtra("removeTexSubImage") && json_Param.has("removeTexSubImage")) {
+                            txsi = json_Param.getBoolean("removeTexSubImage");
+                        }
+                        if (!receivedIntent.hasExtra("removeCopyImage") && json_Param.has("removeCopyImage")) {
+                            cpimg = json_Param.getBoolean("removeCopyImage");
+                        }
+                        if (!receivedIntent.hasExtra("removeBufferMap") && json_Param.has("removeBufferMap")) {
+                            bfmp = json_Param.getBoolean("removeBufferMap");
                         }
                     } catch (Exception e) {
                         json_data = ""; // shut up the compiler
@@ -145,12 +178,67 @@ public class FastforwardActivity extends Activity {
             if (restorefbo0 != -1) {
                 args += ("--restorefbo0 " + restorefbo0 + " ");
             }
-            if (txu == true) {
-                args += "--txu ";
-            }
+
             if (shu == true) {
-                args += "--shu ";
+                args += "--removeUnusedShader 1 ";
+            } else {
+                args += "--removeUnusedShader 0 ";
             }
+
+            if (mipu == true) {
+                args += "--removeUnusedMipmap 1 ";
+            } else {
+                args += "--removeUnusedMipmap 0 ";
+            }
+
+            if (bfu == true) {
+                args += "--removeUnusedBuffer 1 ";
+            } else {
+                args += "--removeUnusedBuffer 0 ";
+            }
+
+            if (nsbfu == true) {
+                args += "--norestoreUnusedBuffer 1 ";
+            } else {
+                args += "--norestoreUnusedBuffer 0 ";
+            }
+
+            if (bfsd == true) {
+                args += "--removeBufferSubData 1 ";
+            } else {
+                args += "--removeBufferSubData 0 ";
+            }
+
+            if (txu == true) {
+                args += "--removeUnusedtex 1 ";
+            } else {
+                args += "--removeUnusedtex 0 ";
+            }
+
+            if (nstxu == true) {
+                args += "--norestoreUnusedtex 1 ";
+            } else {
+                args += "--norestoreUnusedtex 0 ";
+            }
+
+            if (txsi == true) {
+                args += "--removeTexSubImage 1 ";
+            } else {
+                args += "--removeTexSubImage 0 ";
+            }
+
+            if (cpimg == true) {
+                args += "--removeCopyImage 1 ";
+            } else {
+                args += "--removeCopyImage 0 ";
+            }
+
+            if (bfmp == true) {
+                args += "--removeBufferMap 1 ";
+            } else {
+                args += "--removeBufferMap 0 ";
+            }
+
             Log.i(TAG, "forward args: " + args);
 
             Intent forwardIntent = new Intent(this, RetraceActivity.class);

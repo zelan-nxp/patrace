@@ -19,8 +19,8 @@ public:
 
     ~InFileRA()
     {
-        delete [] mExIdToFunc;
-        delete [] mExIdToLen;
+        mExIdToFunc.clear();
+        mExIdToLen.clear();
         mExIdToName.clear();
         delete [] mCache;
     }
@@ -63,6 +63,7 @@ public:
             contentLen = callLen - sizeof(common::BCall);
             call = tmpCall;
         }
+        call.toNext = callLen;
 
         if (!this->ReadChunk(contentLen))
         {

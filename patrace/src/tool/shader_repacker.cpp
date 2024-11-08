@@ -110,7 +110,7 @@ void pack_shaders(ParseInterface& input, common::OutFile& outputFile, const std:
     // Check what we found
     for (const auto& context : input.contexts)
     {
-        for (const auto& shader : context.shaders.all())
+        for (const auto& shader : context.shaders)
         {
             std::string filename = keyword + shader_filename(shader, context.index, 0);
             FILE *fp = fopen(filename.c_str(), "w");

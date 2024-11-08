@@ -376,7 +376,15 @@ public:
     {
         _objects.emplace(0, new ClientSideBufferObject);   // a sentinel for being compatible with old traces
     }
-
+    ClientSideBufferObjectSetPerThread(const ClientSideBufferObjectSetPerThread &other)
+    {
+        for (const auto &iter : other._objects)
+        {
+            unsigned name = iter.first;
+            ClientSideBufferObject *tmp = new ClientSideBufferObject(*iter.second);
+            _objects[name] = tmp;
+        }
+    }
     ~ClientSideBufferObjectSetPerThread()
     {
         for (auto &iter : _objects)
@@ -404,7 +412,7 @@ public:
         if (iter != _objects.end())
         {
             delete _objects.at(name);
-            _objects.at(name) = NULL;
+            _objects.erase(name);
             return;
         }
 

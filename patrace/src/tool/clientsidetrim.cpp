@@ -23,6 +23,7 @@
 #include "tool/utils.hpp"
 
 static bool debug = false;
+static bool patch = false;
 static bool textures = false;
 static int texture_deletes_injected = 0;
 #define DEBUG_LOG(...) if (debug) DBG_LOG(__VA_ARGS__)
@@ -35,6 +36,7 @@ static void printHelp()
         "  -h            Print help\n"
         "  -v            Print version\n"
         "  -t            Also trim textures\n"
+        "  -p            Output a patch file instead\n"
         "  -d            Print debug info\n"
         ;
 }
@@ -77,6 +79,10 @@ int main(int argc, char **argv)
         {
             textures = true;
         }
+        else if (arg == "-p")
+        {
+            patch = true;
+        }
         else if (arg == "-v")
         {
             printVersion();
@@ -105,12 +111,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    common::OutFile outputFile;
     std::string target_trace_filename = argv[argIndex++];
-    if (!outputFile.Open(target_trace_filename.c_str()))
+    common::OutFile outputFile;
+    common::patchfile pf;
+    if (!patch)
     {
-        std::cerr << "Failed to open for writing: " << target_trace_filename << std::endl;
-        return 1;
+        if (!outputFile.Open(target_trace_filename.c_str()))
+        {
+            std::cerr << "Failed to open for writing: " << target_trace_filename << std::endl;
+            return 1;
+        }
+    }
+    else
+    {
+        pf = common::patchfile_open(inputFile->inputFile, target_trace_filename.c_str());
     }
 
     common::CallTM *call = nullptr;
@@ -120,7 +134,7 @@ int main(int argc, char **argv)
     std::map<int, std::map<int, int>> texture_deletes; // context -> (call, texture)
     for (const auto& ctx : inputFile->contexts)
     {
-        for (const auto& tx : ctx.textures.all())
+        for (const auto& tx : ctx.textures)
         {
             if (tx.destroyed.call == -1 && textures)
             {
@@ -150,13 +164,14 @@ int main(int argc, char **argv)
     int count = 0;
     while ((call = inputFile->next_call()))
     {
-        writeout(outputFile, call);
+        if (!patch) writeout(outputFile, call);
         if (callno_to_client_side_last_use.count(call->mCallNo) > 0)
         {
             common::CallTM deletion("glDeleteClientSideBuffer");
             deletion.mArgs.push_back(new common::ValueTM(callno_to_client_side_last_use[call->mCallNo]));
             deletion.mTid = call->mTid;
-            writeout(outputFile, &deletion, true);
+            deletion.mCallNo = call->mCallNo;
+            if (!patch) writeout(outputFile, &deletion, true); else common::patchfile_insert_before(pf, deletion);
             count++;
         }
         if (inputFile->context_index != UNBOUND && texture_deletes.count(inputFile->context_index) && texture_deletes.at(inputFile->context_index).count(call->mCallNo)
@@ -167,24 +182,31 @@ int main(int argc, char **argv)
             deletion.mArgs.push_back(new common::ValueTM(1));
             deletion.mArgs.push_back(common::CreateUInt32ArrayValue({ tx_id }));
             deletion.mTid = call->mTid;
-            writeout(outputFile, &deletion, true);
+            deletion.mCallNo = call->mCallNo;
+            if (!patch) writeout(outputFile, &deletion, true); else common::patchfile_insert_before(pf, deletion);
             texture_deletes_injected++;
             if (debug) DBG_LOG("\tinjecting glDeleteTextures(1, %u) after %s context=%d call=%d\n", tx_id, call->mCallName.c_str(), inputFile->context_index, (int)call->mCallNo);
         }
     }
 
-    Json::Value header = inputFile->header;
-    Json::Value info;
-    info["csb_deletes_injected"] = count;
-    if (texture_deletes_injected) info["texture_deletes_injected"] = texture_deletes_injected;
-    addConversionEntry(header, "inject_client_side_delete", source_trace_filename, info);
-    Json::FastWriter writer;
-    const std::string json_header = writer.write(header);
-    outputFile.mHeader.jsonLength = json_header.size();
-    outputFile.WriteHeader(json_header.c_str(), json_header.size());
-
+    if (!patch)
+    {
+        Json::Value header = inputFile->header;
+        Json::Value info;
+        info["csb_deletes_injected"] = count;
+        if (texture_deletes_injected) info["texture_deletes_injected"] = texture_deletes_injected;
+        addConversionEntry(header, "inject_client_side_delete", source_trace_filename, info);
+        Json::FastWriter writer;
+        const std::string json_header = writer.write(header);
+        outputFile.mHeader.jsonLength = json_header.size();
+        outputFile.WriteHeader(json_header.c_str(), json_header.size());
+        outputFile.Close();
+    }
+    else
+    {
+        common::patchfile_close(pf);
+    }
     inputFile->close();
-    outputFile.Close();
     printf("Injected %d deletion calls\n", count + texture_deletes_injected);
     return 0;
 }

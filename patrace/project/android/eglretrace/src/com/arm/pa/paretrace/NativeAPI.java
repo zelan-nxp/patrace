@@ -16,6 +16,7 @@ public class NativeAPI
     private static Surface surfHolder;
     private static int mViewSize;
     private static final String TAG = "paretrace NativeAPI";
+    public static boolean translucent_surfaceView;
 
     public static void setMsgHandler(Handler handler){
         msgHandler  = handler;
@@ -129,6 +130,7 @@ public class NativeAPI
     public static native void stepframe100();
     public static native void stepdraw1();
     public static native void stepmodefinish();
+    public static native boolean loadAndroidRetraceOptionsFromHeader();
 
     static {
         System.loadLibrary("eglretrace");

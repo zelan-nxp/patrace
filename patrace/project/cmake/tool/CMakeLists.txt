@@ -78,6 +78,7 @@ add_executable(texture_modifier
 target_link_libraries(texture_modifier
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(texture_modifier PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(texture_modifier call_parser_src_generation)
 install(TARGETS texture_modifier DESTINATION tools)
 
@@ -88,6 +89,7 @@ add_executable(shader_modifier
 target_link_libraries(shader_modifier
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(shader_modifier PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(shader_modifier call_parser_src_generation)
 install(TARGETS shader_modifier DESTINATION tools)
 
@@ -98,6 +100,7 @@ add_executable(client_side_buffer_modifier
 target_link_libraries(client_side_buffer_modifier
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(client_side_buffer_modifier PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(client_side_buffer_modifier call_parser_src_generation)
 install(TARGETS client_side_buffer_modifier DESTINATION tools)
 
@@ -111,6 +114,7 @@ add_executable(trace_looper
 target_link_libraries(trace_looper
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(trace_looper PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(trace_looper call_parser_src_generation)
 install(TARGETS trace_looper DESTINATION tools)
 
@@ -123,6 +127,7 @@ add_executable(shader_dumper
     ${SRC_FOR_TOOLS}
 )
 target_link_libraries(shader_dumper ${LIBRARIES_FOR_TOOLS})
+set_target_properties(shader_dumper PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(shader_dumper call_parser_src_generation)
 install(TARGETS shader_dumper DESTINATION tools)
 
@@ -131,24 +136,11 @@ add_executable(texture_dumper
     ${SRC_FOR_TOOLS}
 )
 target_link_libraries(texture_dumper ${LIBRARIES_FOR_TOOLS})
+set_target_properties(texture_dumper PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(texture_dumper call_parser_src_generation)
 install(TARGETS texture_dumper DESTINATION tools)
 
 ###########################################################################
-
-add_executable(flatten_threads
-    ${SRC_ROOT}/tool/flatten_threads.cpp
-    ${SRC_ROOT}/tool/utils.cpp
-    ${SRC_FOR_TOOLS}
-)
-target_link_libraries(flatten_threads
-    md5
-    ${LIBRARIES_FOR_TOOLS}
-)
-add_dependencies(flatten_threads call_parser_src_generation)
-install(TARGETS flatten_threads DESTINATION tools)
-
-###
 
 add_executable(single_surface
     ${SRC_ROOT}/tool/single_surface.cpp
@@ -156,6 +148,7 @@ add_executable(single_surface
     ${SRC_FOR_TOOLS}
 )
 target_link_libraries(single_surface ${LIBRARIES_FOR_TOOLS})
+set_target_properties(single_surface PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(single_surface call_parser_src_generation)
 install(TARGETS single_surface DESTINATION tools)
 
@@ -183,6 +176,7 @@ target_link_libraries(shader_grep
     ${ZLIB_LIBRARIES}
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(shader_grep PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(shader_grep call_parser_src_generation)
 install(TARGETS shader_grep DESTINATION tools)
 
@@ -201,6 +195,7 @@ add_executable(shader_repacker
 )
 target_compile_definitions(shader_repacker PRIVATE RETRACE GLES_CALLCONVENTION= TOOL_BUILD)
 target_link_libraries(shader_repacker ${LIBRARIES_FOR_TOOLS})
+set_target_properties(shader_repacker PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(shader_repacker call_parser_src_generation)
 install(TARGETS shader_repacker DESTINATION tools)
 
@@ -229,6 +224,7 @@ target_link_libraries(totxt
     ${ZLIB_LIBRARIES}
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(totxt PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(totxt call_parser_src_generation)
 install(TARGETS totxt DESTINATION tools)
 
@@ -257,6 +253,7 @@ target_link_libraries(deduplicator
     ${ZLIB_LIBRARIES}
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(deduplicator PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(deduplicator call_parser_src_generation)
 install(TARGETS deduplicator DESTINATION tools)
 
@@ -285,6 +282,7 @@ target_link_libraries(converter
     ${ZLIB_LIBRARIES}
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(converter PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(converter call_parser_src_generation)
 install(TARGETS converter DESTINATION tools)
 
@@ -313,6 +311,7 @@ target_link_libraries(clientsidetrim
     ${ZLIB_LIBRARIES}
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(clientsidetrim PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(clientsidetrim call_parser_src_generation)
 install(TARGETS clientsidetrim DESTINATION tools)
 
@@ -341,6 +340,7 @@ target_link_libraries(shader_analyzer
     ${ZLIB_LIBRARIES}
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(shader_analyzer PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(shader_analyzer call_parser_src_generation)
 install(TARGETS shader_analyzer DESTINATION tools)
 
@@ -395,7 +395,7 @@ target_link_libraries(analyze_trace
     ${LIBRARIES_FOR_TOOLS}
     collector
 )
-set_target_properties(analyze_trace PROPERTIES LINK_FLAGS "-pthread" COMPILE_FLAGS "-pthread")
+set_target_properties(analyze_trace PROPERTIES LINK_FLAGS "-pthread -z max-page-size=16384" COMPILE_FLAGS "-pthread")
 if (${WINDOWSYSTEM} MATCHES "wayland")
     message(STATUS "link with wayland: " ${wayland_LIBRARIES})
     target_compile_options(analyze_trace PRIVATE ${wayland_CFLAGS})
@@ -420,6 +420,7 @@ add_executable(rename_call
     ${SRC_FOR_TOOLS}
 )
 target_link_libraries(rename_call ${LIBRARIES_FOR_TOOLS})
+set_target_properties(rename_call PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(rename_call call_parser_src_generation)
 install(TARGETS rename_call DESTINATION tools)
 
@@ -434,6 +435,7 @@ target_link_libraries(merge_trace
     md5
     ${LIBRARIES_FOR_TOOLS}
 )
+set_target_properties(merge_trace PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(merge_trace call_parser_src_generation)
 install(TARGETS merge_trace DESTINATION tools)
 
@@ -445,6 +447,7 @@ add_executable(trim
     ${SRC_FOR_TOOLS}
 )
 target_link_libraries(trim ${LIBRARIES_FOR_TOOLS})
+set_target_properties(trim PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(trim call_parser_src_generation)
 install(TARGETS trim DESTINATION tools)
 
@@ -456,6 +459,7 @@ add_executable(strip
     ${SRC_FOR_TOOLS}
 )
 target_link_libraries(strip ${LIBRARIES_FOR_TOOLS})
+set_target_properties(strip PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(strip call_parser_src_generation)
 install(TARGETS strip DESTINATION tools)
 
@@ -467,6 +471,7 @@ add_executable(insert_swap_before_terminate
     ${SRC_FOR_TOOLS}
 )
 target_link_libraries(insert_swap_before_terminate ${LIBRARIES_FOR_TOOLS})
+set_target_properties(insert_swap_before_terminate PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(insert_swap_before_terminate call_parser_src_generation)
 install(TARGETS insert_swap_before_terminate DESTINATION tools)
 
@@ -474,6 +479,7 @@ install(TARGETS insert_swap_before_terminate DESTINATION tools)
 
 add_executable(resize ${SRC_ROOT}/tool/resize.cpp ${SRC_ROOT}/tool/utils.cpp ${SRC_FOR_TOOLS})
 target_link_libraries(resize ${LIBRARIES_FOR_TOOLS})
+set_target_properties(resize PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(resize call_parser_src_generation)
 install(TARGETS resize DESTINATION tools)
 
@@ -481,12 +487,14 @@ install(TARGETS resize DESTINATION tools)
 
 add_executable(header_patcher ${SRC_ROOT}/tool/header_patcher.cpp)
 target_link_libraries (header_patcher jsoncpp common)
+set_target_properties(header_patcher PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 install(TARGETS header_patcher DESTINATION tools)
 
 ###
 
 add_executable(vr_pp ${SRC_ROOT}/tool/vr_postprocessing.cpp ${SRC_ROOT}/tool/utils.cpp ${SRC_FOR_TOOLS})
 target_link_libraries(vr_pp ${LIBRARIES_FOR_TOOLS})
+set_target_properties(vr_pp PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(vr_pp call_parser_src_generation)
 install(TARGETS vr_pp DESTINATION tools)
 
@@ -494,6 +502,7 @@ install(TARGETS vr_pp DESTINATION tools)
 
 add_executable(replace_shader ${SRC_ROOT}/tool/replace_shader.cpp ${SRC_ROOT}/tool/utils.cpp ${SRC_FOR_TOOLS})
 target_link_libraries(replace_shader ${LIBRARIES_FOR_TOOLS})
+set_target_properties(replace_shader PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(replace_shader call_parser_src_generation)
 install(TARGETS replace_shader DESTINATION tools)
 
@@ -501,6 +510,7 @@ install(TARGETS replace_shader DESTINATION tools)
 
 add_executable(rgba_to_yuv ${SRC_ROOT}/tool/rgba_to_yuv.cpp ${SRC_FOR_TOOLS})
 target_link_libraries(rgba_to_yuv ${LIBRARIES_FOR_TOOLS})
+set_target_properties(rgba_to_yuv PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(rgba_to_yuv call_parser_src_generation)
 install(TARGETS rgba_to_yuv DESTINATION tools)
 
@@ -508,6 +518,7 @@ install(TARGETS rgba_to_yuv DESTINATION tools)
 
 add_executable(APIremap_post_processing ${SRC_ROOT}/tool/APIremap_post_processing.cpp ${SRC_FOR_TOOLS})
 target_link_libraries(APIremap_post_processing ${LIBRARIES_FOR_TOOLS})
+set_target_properties(APIremap_post_processing PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(APIremap_post_processing call_parser_src_generation)
 install(TARGETS APIremap_post_processing DESTINATION tools)
 
@@ -515,6 +526,7 @@ install(TARGETS APIremap_post_processing DESTINATION tools)
 
 add_executable(trace_to_txt ${SRC_ROOT}/tool/trace_to_txt.cpp ${SRC_FOR_TOOLS})
 target_link_libraries(trace_to_txt ${LIBRARIES_FOR_TOOLS})
+set_target_properties(trace_to_txt PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(trace_to_txt call_parser_src_generation)
 install(TARGETS trace_to_txt DESTINATION tools)
 
@@ -522,6 +534,7 @@ install(TARGETS trace_to_txt DESTINATION tools)
 
 add_executable(remove_crop ${SRC_ROOT}/tool/remove_crop.cpp ${SRC_FOR_TOOLS})
 target_link_libraries(remove_crop ${LIBRARIES_FOR_TOOLS})
+set_target_properties(remove_crop PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 add_dependencies(remove_crop call_parser_src_generation)
 install(TARGETS remove_crop DESTINATION tools)
 
@@ -529,5 +542,6 @@ install(TARGETS remove_crop DESTINATION tools)
 
 add_executable(update_dictionary ${SRC_ROOT}/tool/update_dictionary.cpp)
 target_link_libraries(update_dictionary ${LIBRARIES_FOR_TOOLS})
+set_target_properties(update_dictionary PROPERTIES LINK_FLAGS "-z max-page-size=16384")
 install(TARGETS update_dictionary DESTINATION tools)
 add_dependencies(update_dictionary call_parser_src_generation)

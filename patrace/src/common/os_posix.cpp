@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/prctl.h>
 
 #if defined(__linux__)
 #include <linux/limits.h> // PATH_MAX
@@ -404,3 +405,18 @@ std::string getTemporaryFilename(const char* description)
 
 } /* namespace os */
 
+void set_thread_name(const std::string& name)
+{
+  // "length is restricted to 16 characters, including the terminating null byte"
+  // http://man7.org/linux/man-pages/man3/pthread_setname_np.3.html
+  assert(name.size() <= 15);
+  prctl(PR_SET_NAME, (unsigned long)name.c_str(), 0, 0, 0);
+}
+
+std::string get_thread_name()
+{
+  std::string name;
+  name.resize(16);
+  prctl(PR_GET_NAME, name.c_str());
+  return name;
+}

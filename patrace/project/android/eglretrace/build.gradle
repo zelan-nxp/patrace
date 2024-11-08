@@ -3,12 +3,12 @@ import java.lang.annotation.Target
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 23
+    compileSdkVersion 29
 
     defaultConfig {
         applicationId "com.arm.pa.paretrace"
-        minSdkVersion 23
-        targetSdkVersion 23
+        minSdkVersion 25
+        targetSdkVersion 29
         versionCode 1
         versionName "2.6"
         ndk {

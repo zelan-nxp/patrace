@@ -32,9 +32,9 @@ public:
 
     void writeHeader(bool cleanExit);
 
-    inline void write(const void* buf, unsigned int len)
+    inline void write(unsigned int len)
     {
-        traceFile->Write(buf, len);
+        traceFile->Progress(len);
     }
 
     void saveExtensions();
@@ -64,9 +64,7 @@ public:
     };
     CaptureInfo captureInfo;
 
-private:
-    // The binary trace file
-    common::OutFile*        traceFile;
+    common::OutFile* traceFile = nullptr;
 };
 
 class TraceOut {
@@ -76,7 +74,6 @@ public:
 
     // The buffer and mutex used during capturing
     const static int WRITE_BUF_LEN = (150*1024*1024);
-    char* writebuf = nullptr;
     std::recursive_mutex callMutex;
 
     unsigned callNo = 0;
@@ -84,28 +81,31 @@ public:
     bool snapDraw = false;
     long long mFrameBegTime = 0;
 
-    TraceOut();
-    ~TraceOut();
+    TraceOut() {}
+    ~TraceOut() { Close(); }
 
-    inline void Write(const void* buf, unsigned int len)
+    inline char* Start()
     {
         if (mpBinAndMeta == NULL)
         {
             mpBinAndMeta = new BinAndMeta();
             mStateLogger.open(mpBinAndMeta->getFileName() + ".tracelog");
         }
-        mpBinAndMeta->write(buf, len);
+        return mpBinAndMeta->traceFile->Scratch();
     }
 
     inline void WriteBuf(const char *endPointer)
     {
-        const int size = endPointer - writebuf;
-        if (size > WRITE_BUF_LEN)
-        {
-            DBG_LOG("Write buffer overflow (%d > %d)\n", size, WRITE_BUF_LEN);
-            abort(); // we've already overwritten memory, no way to recover
-        }
-        Write(writebuf, size);
+        mpBinAndMeta->write(endPointer - mpBinAndMeta->traceFile->Scratch());
+    }
+
+    inline void WriteVlen(const char *end)
+    {
+        const char* start = mpBinAndMeta->traceFile->Scratch();
+        common::BCall_vlen *pCall = (common::BCall_vlen*)start;
+        const size_t count = end - start;
+        pCall->toNext = count;
+        mpBinAndMeta->write(count);
     }
 
     void Close()
@@ -198,7 +198,6 @@ struct TraceThread {
     TraceThread()
         : mCurCtx(NULL)
         , mCurSurf(NULL)
-        , mCallDepth(0)
         , mActiveAttributes()
         , mEglImageToTextureIdMap()
     {}

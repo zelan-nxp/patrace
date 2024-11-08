@@ -679,7 +679,7 @@ common::CallTM* ParseInterfaceRetracing::next_call()
         if (contexts[context_index].shaders.contains(shader))
         {
             int target_shader_index = contexts[context_index].shaders.remap(shader);
-            if (contexts[context_index].shaders.all().size() > (unsigned)target_shader_index) // this is for Egypt...
+            if (contexts[context_index].shaders.size() > (unsigned)target_shader_index) // this is for Egypt...
             {
                 GLint compiled = 0;
                 glGetShaderiv(gRetracer.getCurrentContext().getShaderMap().RValue(shader), GL_COMPILE_STATUS, &compiled);
@@ -1377,14 +1377,15 @@ void ParseInterfaceRetracing::cleanup()
     GLWS::instance().Cleanup();
 }
 
-void ParseInterfaceRetracing::outputTexUsage(std::unordered_set<unsigned int>& unusedMipgen, std::map<int, std::unordered_set<unsigned int>> & map_unusedTexture, std::map<int, std::unordered_set<unsigned int>> & map_unusedBuffer, std::map<int, std::unordered_set<unsigned int>> & map_unusedShader)
+void ParseInterfaceRetracing::outputTexUsage(std::unordered_set<unsigned int>& unusedMipgen, std::map<int, std::unordered_set<unsigned int>> & map_unusedTexture, std::map<int, std::unordered_set<unsigned int>> & map_unusedBuffer, std::map<int, std::unordered_set<unsigned int>> & map_unusedShader, std::map<int, std::unordered_set<unsigned int>> & map_unusedProgram)
 {
     for (const auto& ctx : contexts)
     {
         std::unordered_set<unsigned int> unusedTexture;
         std::unordered_set<unsigned int> unusedBuffer;
         std::unordered_set<unsigned int> unusedShader;
-        for (const auto& tx : ctx.textures.all())
+        std::unordered_set<unsigned int> unusedProgram;
+        for (const auto& tx : ctx.textures)
         {
             if (!tx.used) unusedTexture.insert(tx.index);
             for (const auto& mip : tx.mipmaps)
@@ -1392,18 +1393,24 @@ void ParseInterfaceRetracing::outputTexUsage(std::unordered_set<unsigned int>& u
                 if (!mip.second.used) unusedMipgen.insert(mip.first);
             }
         }
-        for (const auto& sh : ctx.shaders.all())
+        for (const auto& sh : ctx.shaders)
         {
             if (!sh.used)
                 unusedShader.insert(sh.index);
         }
-        for (const auto& bf : ctx.buffers.all())
+        for (const auto& bf : ctx.buffers)
         {
             if (!bf.used)
                 unusedBuffer.insert(bf.index);
         }
+        for (const auto& p : ctx.programs)
+        {
+            if (!p.used)
+                unusedProgram.insert(p.index);
+        }
         map_unusedTexture.emplace(ctx.index, unusedTexture);
         map_unusedBuffer.emplace(ctx.index, unusedBuffer);
         map_unusedShader.emplace(ctx.index, unusedShader);
+        map_unusedProgram.emplace(ctx.index, unusedProgram);
     }
 }

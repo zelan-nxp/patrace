@@ -38,7 +38,6 @@ using namespace retracer;
 
 void TraceExecutor::overrideDefaultsWithJson(Json::Value &value)
 {
-    bool usedFramerange = false;
     retracer::RetraceOptions& options = gRetracer.mOptions;
 
     options.mDoOverrideResolution = value.get("overrideResolution", false).asBool();
@@ -64,9 +63,19 @@ void TraceExecutor::overrideDefaultsWithJson(Json::Value &value)
         options.mFinishBeforeSwap = true;
     }
 
+    if (value.get("intervalswap", false).asBool())
+    {
+        options.mIntervalSwap = true;
+    }
+
     if (value.get("flushWork", false).asBool())
     {
         options.mFlushWork = true;
+    }
+
+    if (value.get("translucent_surface", false).asBool())
+    {
+        options.mTranslucentSurface = true;
     }
 
     options.mForceVRS = value.get("forceVRS", options.mForceVRS).asInt();
@@ -126,16 +135,15 @@ void TraceExecutor::overrideDefaultsWithJson(Json::Value &value)
             }
             options.mBeginMeasureFrame = start;
             options.mEndMeasureFrame = end;
-            usedFramerange = true;
         } else {
             gRetracer.reportAndAbort("Invalid frames parameter [ %s ]", frames.c_str());
         };
     }
 
     options.mCallStats = value.get("callStats", options.mCallStats).asBool();
-    if (options.mCallStats && !usedFramerange)
+    if (options.mCallStats && (options.mEndMeasureFrame == INT32_MAX))
     {
-        gRetracer.reportAndAbort("callStats requires frames to also be present in the JSON input!\n");
+        gRetracer.reportAndAbort("callStats requires frames to also be present in the JSON input!");
     }
 
     if(value.isMember("perfrange")){
@@ -157,7 +165,12 @@ void TraceExecutor::overrideDefaultsWithJson(Json::Value &value)
 
     if (value.isMember("scriptpath")) {
         options.mScriptPath = value.get("scriptpath", "").asString();
-        options.mScriptFrame = value.get("scriptframe", -1).asInt();
+        delete options.mScriptCallSet;
+        options.mScriptCallSet = new common::CallSet(value.get("scriptcallset", "").asCString());
+    }
+
+    if (value.isMember("patch")) {
+        options.mPatchPath = value.get("patch", "").asString();
     }
 
 #ifdef ANDROID
