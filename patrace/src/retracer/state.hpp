@@ -191,6 +191,7 @@ public:
     }
 
     std::unordered_map<unsigned int, locationmap >& getUniformlocationMap();
+    std::unordered_map<unsigned int, stdmap<unsigned int, unsigned int> >& getUniformblockindexMap();
     hmap<unsigned int>& getTextureMap();
     hmap<unsigned int>& getTextureRevMap();
 
@@ -220,8 +221,8 @@ public:
 
     hmap<unsigned int> _list_map;
     hmap<unsigned int> _query_map;
-    std::unordered_map<unsigned int, locationmap > _uniformLocation_map;
-    std::unordered_map<unsigned int, stdmap<unsigned int, unsigned int> > _uniformBlockIndex_map;
+    std::unordered_map<unsigned int, locationmap > _uniformLocation_map;  // // program id to uniform locationmap; shared
+    std::unordered_map<unsigned int, stdmap<unsigned int, unsigned int> > _uniformBlockIndex_map;  // // program id to uniform blockindexmap; shared
     hmap<unsigned int> _framebuffer_map;
     hmap<unsigned int> _array_map;
     hmap<unsigned int> _feedback_map;
@@ -311,6 +312,18 @@ inline std::unordered_map<unsigned int, locationmap >& Context::getUniformlocati
     else
     {
         return _uniformLocation_map;
+    }
+}
+
+inline std::unordered_map<unsigned int, stdmap<unsigned int, unsigned int> >& Context::getUniformblockindexMap()
+{
+    if (_shareContext)
+    {
+        return _shareContext->getUniformblockindexMap();
+    }
+    else
+    {
+        return _uniformBlockIndex_map;
     }
 }
 

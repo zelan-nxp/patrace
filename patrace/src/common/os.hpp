@@ -107,7 +107,7 @@ void resetExceptionCallback(void);
 #include <sstream>
 
 template <typename T>
-std::string _to_string(T value)
+std::string __to_string(T value)
 {
     std::ostringstream os;
     os << value;

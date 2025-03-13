@@ -15,33 +15,6 @@ ShaderMod::ShaderMod(retracer::Retracer& retracer, int programName, Json::Value&
 {
 }
 
-void ShaderMod::removeUnusedAttributes()
-{
-    const Json::Value& json = mRetracer.mFile.getJSONHeader();
-    int tid = mRetracer.getCurTid();
-
-    if (json["threads"][tid]["attributes"].isNull())
-    {
-        //DBG_LOG("attributes do not exist in the trace header\n");
-        return;
-    }
-
-    int callCount = mRetracer.mCallCounter["glLinkProgram"];
-    const Json::Value& originalAttributes = json["threads"][tid]["attributes"][callCount];
-
-    if (originalAttributes.type() == Json::nullValue)
-    {
-        mError = true;
-        std::stringstream ss;
-        ss << "No information about this glLinkProgram call in the trace header! ";
-        ss << "CallNo: " << mRetracer.GetCurCallId();
-        mErrorString = ss.str();
-    }
-
-    std::vector<VertexArrayInfo> unusedAttributes = getUnusedAttributes(originalAttributes);
-    removeAttributes(unusedAttributes);
-}
-
 std::vector<VertexArrayInfo> ShaderMod::getUnusedAttributes(const Json::Value& originalAttributes)
 {
     std::vector<VertexArrayInfo> unusedAttributes;

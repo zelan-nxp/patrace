@@ -142,8 +142,6 @@ struct BufferRangeData
 
 typedef std::unordered_map<GLuint, BufferRangeData> BufferToClientPointerMap_t;
 typedef std::unordered_set<GLuint> BufferInitializedSet_t;
-typedef std::vector<std::string> StringList_t;
-typedef std::vector<StringList_t> StringListList_t;
 
 struct TraceContext
 {
@@ -198,14 +196,12 @@ struct TraceThread {
     TraceThread()
         : mCurCtx(NULL)
         , mCurSurf(NULL)
-        , mActiveAttributes()
         , mEglImageToTextureIdMap()
     {}
 
     TraceContext *mCurCtx;
     TraceSurface *mCurSurf;
     int mCallDepth;
-    StringListList_t mActiveAttributes;
     EGLImageToTextureIdMap_t mEglImageToTextureIdMap;
     EGLImageInfoMap_t mEglImageInfoMap;
 };

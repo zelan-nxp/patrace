@@ -1628,7 +1628,7 @@ void ParseInterfaceBase::interpret_call(common::CallTM *call)
                 assert(valno != -1);
                 assert(call->mArgs[valno]->mType == common::Opaque_Type);
                 // very old trace files will have call->mArgs[valno]->mOpaqueIns->mType == common::Uint_Type, not sure how to handle here
-                if (call->mArgs[valno]->mOpaqueIns->mType == common::Blob_Type && call->mArgs[valno]->mOpaqueIns->mBlobLen == 0)
+                if (call->mArgs[valno]->mOpaqueIns && call->mArgs[valno]->mOpaqueIns->mType == common::Blob_Type && call->mArgs[valno]->mOpaqueIns->mBlobLen == 0)
                 {
                     tex.initialized.at(level) = false;
                 }

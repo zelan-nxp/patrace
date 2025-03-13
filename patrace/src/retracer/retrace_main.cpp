@@ -55,7 +55,11 @@ usage(const char *argv0) {
         "  -strictcolor Same as -strict, but only checks color channels (RGBA). Useful for dumping when we want to be sure returned EGL is same as requested\n"
         "  -forceVRS VALUE Force the use of VRS for all framebuffers. Valid values: 38566 (1x1), 38567 (1x2), 38568 (2x1), 38569 (2x2), 38572 (4x2) and 38574 (4x4).\n"
         "  -collect Collect performance counters\n"
-        "  -perfmon Collect performance counters in the built-in perfmon interface\n"
+        "  -perfmon OUT_DIR Collect gpu performance counters in the built-in gpuCounter interface\n"
+#ifdef ENABLE_PERFPERAPI
+        "  -perfperapi Enable perf instrumentation per GLES API entrypoint\n"
+        "  -perfperapiOutDir DIR Set output directory for perf per API instrumentation, defaults to ./perfperapi\n"
+#endif
         "  -instrumentation-delay USECONDS Delay in microseconds that the retracer should sleep for after each present call in the measurement range.\n"
         "  -skipfence START-END,START-END... Skip some fence waits calls (eglClientWaitSync, eglWaitSync, eglClientWaitSyncKHR, eglWaitSyncKHR, glWaitSync, glClientWaitSync) when within any of the given (comma separated list of) ranges. All ranges include the start frame and the end frame,\n"
         "  -flush Before starting running the defined measurement range, make sure we flush all pending driver work\n"
@@ -255,11 +259,33 @@ bool ParseCommandLine(int argc, char** argv, RetraceOptions& mOptions)
             mOptions.mSingleSurface = readValidValue(argv[++i]);
         } else if (!strcmp(arg, "-perfmon")) {
             mOptions.mPerfmon = true;
+            mOptions.mPerfmonOut = argv[++i];
         } else if (!strcmp(arg, "-collect")) {
             if (!gRetracer.mCollectors) gRetracer.mCollectors = new Collection(Json::Value());
         } else if (!strcmp(arg, "-collect_streamline")) {
             if (!gRetracer.mCollectors) gRetracer.mCollectors = new Collection(Json::Value());
             streamline_collector = true;
+        } else if(!strcmp(arg, "-perfperapi")) {
+#ifdef ENABLE_PERFPERAPI
+            if (!mOptions.mPerfPerApi)
+            {
+                mOptions.mPerfPerApi = true;
+                // when enabling per api flag, override previous collector directly
+                gRetracer.mCollectors = new Collection(Json::Value(), true);
+            }
+#else
+            DBG_LOG("Per API instrumentation feature is not included in this build. "
+                    "Did you set --perfperapi true in the build script?\n");
+            return false;
+#endif
+        } else if (!strcmp(arg, "-perfperapiOutDir")) {
+#ifdef ENABLE_PERFPERAPI
+            mOptions.mPerfPerApiOutDir = argv[++i];
+#else
+            DBG_LOG("Per API instrumentation feature is not included in this build. "
+                    "Did you set --perfperapi true in the build script?\n");
+            return false;
+#endif
         } else if (!strcmp(arg, "-flushonswap")) {
             mOptions.mFinishBeforeSwap = true;
         } else if (!strcmp(arg, "-intervalswap")) {

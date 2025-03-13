@@ -216,10 +216,10 @@ inline char* WriteFixed(char* dest, T val, bool doPadding = true) {
 }
 
 template <class T>
-inline char* Write1DArray(char* dest, unsigned int len, const T* array) {
+inline char* Write1DArray(char* dest, int len, const T* array) {
     // There are some cases, the array could be an optional parameter
     // so we cannot count on the value of *len*
-    if (array == NULL)
+    if (array == NULL || len < 0)
         len = 0;
     unsigned int byLen = len*sizeof(T);
     dest = WriteFixed(dest, byLen);

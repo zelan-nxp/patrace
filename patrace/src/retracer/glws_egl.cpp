@@ -8,6 +8,8 @@
 
 using namespace retracer;
 
+std::map<std::vector<uint8_t>, std::vector<uint8_t>> gApplicationCache;
+
 EglDrawable::EglDrawable(int w, int h, EGLDisplay eglDisplay, EGLConfig eglConfig, NativeWindow* nativeWindow, EGLint const* attribList)
     : Drawable(w, h)
     , mEglDisplay(eglDisplay)
@@ -266,6 +268,47 @@ static void callback(EGLenum error, const char *command, EGLint messageType, EGL
     DBG_LOG("EGL callback : %s : %s\n", command, message);
 }
 
+void setFunction(const void* key, EGLsizeiANDROID keySize, const void* value, EGLsizeiANDROID valueSize)
+{
+    if (key == nullptr || value == nullptr)
+    {
+        DBG_LOG("Error: key or value is nullptr");
+        return;
+    }
+
+    std::vector<uint8_t> keyVec(keySize);
+    memcpy(keyVec.data(), key, keySize);
+
+    std::vector<uint8_t> valueVec(valueSize);
+    memcpy(valueVec.data(), value, valueSize);
+
+    gApplicationCache[keyVec] = valueVec;
+}
+
+EGLsizeiANDROID getFunction(const void* key, EGLsizeiANDROID keySize, void* value, EGLsizeiANDROID valueSize)
+{
+    std::vector<uint8_t> keyVec(keySize);
+    memcpy(keyVec.data(), key, keySize);
+
+    auto entry = gApplicationCache.find(keyVec);
+    if (entry == gApplicationCache.end())
+    {
+        return 0;
+    }
+
+    if (value == nullptr && valueSize == 0)
+    {
+        // Return the size of the value without copying it
+        return entry->second.size();
+    }
+
+    if (value != nullptr && entry->second.size() <= static_cast<size_t>(valueSize))
+    {
+        memcpy(value, entry->second.data(), entry->second.size());
+    }
+    return entry->second.size();
+}
+
 void GlwsEgl::Init(Profile /*profile*/)
 {
     mEglNativeDisplay = getNativeDisplay();
@@ -317,6 +360,20 @@ void GlwsEgl::Init(Profile /*profile*/)
         gRetracer.reportAndAbort("Unable to initialize EGL display: 0x%04x", error);
     }
     DBG_LOG("eglInitialize %d.%d\n", major, minor);
+
+    if(gRetracer.mOptions.mSaveBlobCache || gRetracer.mOptions.mLoadBlobCache)
+    {
+        if (gRetracer.mOptions.mLoadBlobCache)
+        {
+            LoadCacheFromFile(gApplicationCache);
+        }
+
+        PFNEGLSETBLOBCACHEFUNCSANDROIDPROC _eglSetBlobCacheFuncsANDROID =
+        (PFNEGLSETBLOBCACHEFUNCSANDROIDPROC)eglGetProcAddress(
+            "eglSetBlobCacheFuncsANDROID");
+
+        _eglSetBlobCacheFuncsANDROID(mEglDisplay, setFunction, getFunction);
+    }
 
     PFNEGLDEBUGMESSAGECONTROLKHRPROC _eglDebugMessageControlKHR = (PFNEGLDEBUGMESSAGECONTROLKHRPROC)eglGetProcAddress("eglDebugMessageControlKHR");
     if (isEglExtensionSupported(mEglDisplay, "EGL_KHR_debug") && _eglDebugMessageControlKHR) _eglDebugMessageControlKHR(callback, nullptr);
@@ -545,6 +602,11 @@ bool GlwsEgl::querySupportedCompressionRates(const EGLAttrib *attrib_list, EGLin
 
 void GlwsEgl::Cleanup()
 {
+    if (gRetracer.mOptions.mSaveBlobCache)
+    {
+        SaveCacheToFile(gApplicationCache);
+    }
+
     if (mEglDisplay != EGL_NO_DISPLAY)
     {
         eglMakeCurrent(mEglDisplay, NULL, NULL, NULL);

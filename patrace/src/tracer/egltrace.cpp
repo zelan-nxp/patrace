@@ -234,21 +234,6 @@ void BinAndMeta::writeHeader(bool cleanExit)
 
             addEGLConfigToJSON(jsThread, config);
 
-            // Convert the attributes from STL container to JSON
-            Json::Value attributes(Json::arrayValue);
-
-            const StringListList_t& aa = gTraceThread.at(index).mActiveAttributes;
-            for (const StringList_t& strList : aa)
-            {
-                Json::Value attributesNames(Json::arrayValue);
-                for (const std::string& attributeName : strList)
-                {
-                    attributesNames.append(attributeName);
-                }
-                attributes.append(attributesNames);
-            }
-
-            jsThread["attributes"] = attributes;
             jsonRoot["threads"].append(jsThread);
         }
         index++;
@@ -906,21 +891,6 @@ void after_glDraw()
 
 void after_glLinkProgram(unsigned int program)
 {
-    ProgramInfo pi(program);
-    unsigned char tid = GetThreadId();
-    StringListList_t& aa = gTraceThread.at(tid).mActiveAttributes;
-
-    // 1. Add empty list
-    aa.push_back(StringList_t());
-    // 2. Get its reference
-    StringList_t& aaList = aa.back();
-    for (int i = 0; i < pi.activeAttributes; ++i)
-    {
-        VertexArrayInfo vai = pi.getActiveAttribute(i);
-        // 3. Add stuff to it
-        aaList.push_back(vai.name);
-    }
-
     // Inject glGetUniformBlockIndex calls to be sure we can intercept and remap block indices on retrace
     GLint linkStatus = GL_FALSE;
     _glGetProgramiv(program, GL_LINK_STATUS, &linkStatus);

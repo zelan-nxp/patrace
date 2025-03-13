@@ -143,6 +143,41 @@ LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_EXECUTABLE)
 
 ################################################################
+# Target: libGPUCounter
+include $(CLEAR_VARS)
+
+LOCAL_MODULE        := hwcpipe_android
+LOCAL_SRC_FILES     := \
+                ../../thirdparty/hwcpipe/hwcpipe/src/error.cpp \
+                ../../thirdparty/hwcpipe/hwcpipe/src/hwcpipe/all_gpu_counters.cpp \
+                ../../thirdparty/hwcpipe/hwcpipe/src/hwcpipe/counter_metadata.cpp \
+                ../../thirdparty/hwcpipe/hwcpipe/src/hwcpipe/derived_functions.cpp \
+                ../../thirdparty/hwcpipe/hwcpipe/src/hwcpipe/detail/counter_database.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/handle.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/instance.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/num_exec_engines.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/product_id.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/hwcnt/backend_type.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/hwcnt/reader.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/hwcnt/sampler/detail/backend.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/hwcnt/sampler/kinstr_prfcnt/block_index_remap.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/hwcnt/sampler/kinstr_prfcnt/enum_info_parser.cpp \
+                ../../thirdparty/hwcpipe/backend/device/src/device/hwcnt/sampler/kinstr_prfcnt/metadata_parser.cpp
+
+
+LOCAL_C_INCLUDES    := \
+                $(LOCAL_PATH)/../../thirdparty/hwcpipe/hwcpipe/include \
+                $(LOCAL_PATH)/../../thirdparty/hwcpipe/hwcpipe/src \
+                $(LOCAL_PATH)/../../thirdparty/hwcpipe/backend/device/include \
+                $(LOCAL_PATH)/../../thirdparty/hwcpipe/backend/device/src
+
+LOCAL_CFLAGS        := -O3 -fno-rtti -fno-exceptions -Werror -pedantic-errors -Wall -Wextra -pedantic
+LOCAL_CPPFLAGS      += -std=c++14
+LOCAL_LDFLAGS       += -Wl,-z,max-page-size=16384
+
+include $(BUILD_STATIC_LIBRARY)
+
+################################################################
 # Target: common
 include $(CLEAR_VARS)
 
@@ -218,10 +253,6 @@ include $(CLEAR_VARS)
 LOCAL_MODULE        := eglretrace
 
 LOCAL_SRC_FILES     := \
-    ../../thirdparty/hwcpipe/hwcpipe.cpp \
-    ../../thirdparty/hwcpipe/vendor/arm/mali/mali_profiler.cpp \
-    ../../thirdparty/hwcpipe/vendor/arm/pmu/pmu_counter.cpp \
-    ../../thirdparty/hwcpipe/vendor/arm/pmu/pmu_profiler.cpp \
     dispatch/eglproc_retrace.cpp \
     dispatch/eglproc_auto.cpp \
     fastforwarder/fastforwarder.cpp \
@@ -265,7 +296,8 @@ LOCAL_C_INCLUDES    := \
     $(LOCAL_PATH)/../../common \
     $(LOCAL_PATH)/../../thirdparty \
     $(LOCAL_PATH)/../../thirdparty/collector \
-    $(LOCAL_PATH)/../../thirdparty/hwcpipe \
+    $(LOCAL_PATH)/../../thirdparty/hwcpipe/hwcpipe/include \
+    $(LOCAL_PATH)/../../thirdparty/hwcpipe/backend/device/include \
     $(LOCAL_PATH)/../../thirdparty/libcollector \
     $(LOCAL_PATH)/../../thirdparty/egl-registry/api \
     $(LOCAL_PATH)/../../thirdparty/opencl-headers \
@@ -273,14 +305,14 @@ LOCAL_C_INCLUDES    := \
     $(LOCAL_PATH)/../../thirdparty/libcollector/external/jsoncpp/include \
     $(LOCAL_PATH)/../../thirdparty/snappy
 
-LOCAL_CFLAGS        := -Wall -frtti -DRETRACE $(PA_BUILD_64BIT) -pthread
+LOCAL_CFLAGS        := -Wall -frtti -DRETRACE $(PA_BUILD_64BIT) -pthread -Wswitch-default -Wswitch-enum
 LOCAL_CPPFLAGS      += -std=c++14 -DHWCPIPE_NO_JSON
 
 ifeq ($(TARGET_ARCH_ABI),x86)
 LOCAL_CFLAGS            += -Wno-attributes
 endif
 
-LOCAL_STATIC_LIBRARIES := common graphicbuffer snappy md5 jsoncpp png collector_android
+LOCAL_STATIC_LIBRARIES := common graphicbuffer snappy md5 jsoncpp png collector_android hwcpipe_android
 LOCAL_LDLIBS        := -nodefaultlibs -lc -lm -llog -landroid -ldl -lz -pthread
 LOCAL_LDFLAGS   += -Wl,-z,max-page-size=16384
 include $(BUILD_SHARED_LIBRARY)

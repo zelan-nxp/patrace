@@ -155,7 +155,8 @@ void GlwsEglX11::processStepEvent()
             }
             else if (ks == XK_F10)
             {
-                gRetracer.mFinish = true;
+                gRetracer.drawBudget = INT64_MAX;
+                gRetracer.frameBudget = INT64_MAX;
                 return;
             }
         }

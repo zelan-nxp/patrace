@@ -17,12 +17,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Build patrace')
     parser.add_argument('project', default='patrace', choices=['patrace'], help='the only valid value is \'patrace\'')
     parser.add_argument('platform', default='x11_x64', choices=all_platforms, help="window system and architecture separated with an underscore, defined in patrace/project/cmake/toolchains")
-    parser.add_argument('type', default='debug', choices=['debug', 'release', 'sanitizer'], help='the build type')
+    parser.add_argument('type', default='debug', choices=['debug', 'release', 'sanitizer', 'RelWithDebInfo'], help='the build type')
     parser.add_argument('--build-dir', default='', help='path to build directory. Defaults to \'builds\' in the top level project directory.')
     parser.add_argument('--install-dir', default='', help='path to install directory. When relative, it is relative to the build directory. Defaults to \'install\' in the top level project directory.')
     parser.add_argument('--ffi7', type=bool, default=False, help='build wayland_aarch64 with libffi.7.so. Default to build with libffi.6.so')
     parser.add_argument('--ffi8', type=bool, default=False, help='build wayland_aarch64 with libffi.8.so. Default to build with libffi.6.so')
     parser.add_argument('--static', type=bool, default=False, help='build patrace statically. Defaults to \'false\'')
+    parser.add_argument('--perfperapi', type=bool, default=False, help='build patrace with per gles api perf instrumentation. Defaults to \'false\'')
     args = parser.parse_args()
 
     exclude = ['android', 'fbdev_x32', 'fbdev_x64', 'rhe6_x32', 'rhe6_x64']
@@ -75,7 +76,8 @@ if __name__ == '__main__':
             cmake_defines=[],
             static=args.static,
             ffi7=args.ffi7,
-            ffi8=args.ffi8
+            ffi8=args.ffi8,
+            perfperapi=args.perfperapi
         )
 
     sys.exit(returncode)

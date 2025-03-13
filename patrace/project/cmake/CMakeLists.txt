@@ -6,7 +6,7 @@ set (PYTHON_EXECUTABLE python)
 message(STATUS "main ar: ${CMAKE_AR}")
 
 set (PATRACE_VERSION_MAJOR 5)
-set (PATRACE_VERSION_MINOR 3)
+set (PATRACE_VERSION_MINOR 4)
 set (PATRACE_VERSION_PATCH 0)
 
 IF(DEFINED ENV{SVN_REVISION})
@@ -129,7 +129,7 @@ include_directories(BEFORE
 include_directories(${THIRDPARTY_INCLUDE_DIRS})
 include_directories(${SRC_INCLUDE_DIRS})
 
-set(HWCPIPE_INCLUDE_DIRS ${THIRDPARTY_INCLUDE_DIRS}/hwcpipe)
+set(HWCPIPE_INCLUDE_DIRS ${THIRDPARTY_INCLUDE_DIRS}/hwcpipe/hwcpipe/include)
 add_subdirectory(${THIRDPARTY_INCLUDE_DIRS}/hwcpipe ${CMAKE_CURRENT_BINARY_DIR}/hwcpipe EXCLUDE_FROM_ALL)
 include_directories(${HWCPIPE_INCLUDE_DIRS})
 

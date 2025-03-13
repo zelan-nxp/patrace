@@ -759,7 +759,17 @@ PUBLIC void retrace_eglMakeCurrent(char* src)
         glFlush();
     }
 
+    // ---------- perf collect start ----------
+#ifdef ENABLE_PERFPERAPI
+    pid_t curTid = 0;
+    bool perf_starting = false;
+    PERF_SCOPE_START(791, &curTid, &perf_starting);
+#endif
     bool ok = GLWS::instance().MakeCurrent(drawable, context);
+    // ---------- perf collect stop -----------
+#ifdef ENABLE_PERFPERAPI
+    PERF_SCOPE_STOP(791, curTid, perf_starting);
+#endif
     if (!ok)
     {
         DBG_LOG("Warning: retrace_eglMakeCurrent failed,(0x%x) \n", eglGetError());
@@ -843,10 +853,9 @@ PUBLIC void retrace_eglMakeCurrent(char* src)
         }
 
         gGlesFeatures.Update();
-        if (gRetracer.delayedPerfmonInit) gRetracer.perfMonInit();
     }
 
-    if (drawable && gRetracer.mOptions.mForceOffscreen)
+    if (context && gRetracer.mOptions.mForceOffscreen)
     {
         if (!context->_offscrMgr)
         {
@@ -1175,7 +1184,17 @@ PUBLIC void swapBuffersCommon(char* src, bool withDamage)
 
         if (gRetracer.mpOffscrMgr->MosaicToScreenIfNeeded())
         {
+            // ---------- perf collect start ----------
+#ifdef ENABLE_PERFPERAPI
+            pid_t curTid = 0;
+            bool perf_starting = false;
+            PERF_SCOPE_START(795, &curTid, &perf_starting);
+#endif
             pDrawable->swapBuffers();
+            // ---------- perf collect stop -----------
+#ifdef ENABLE_PERFPERAPI
+            PERF_SCOPE_STOP(795, curTid, perf_starting);
+#endif
             gRetracer.mMosaicNeedToBeFlushed = false;
         }
         else
@@ -1199,11 +1218,31 @@ PUBLIC void swapBuffersCommon(char* src, bool withDamage)
     {
         if (withDamage)
         {
+            // ---------- perf collect start ----------
+#ifdef ENABLE_PERFPERAPI
+            pid_t curTid = 0;
+            bool perf_starting = false;
+            PERF_SCOPE_START(843, &curTid, &perf_starting);
+#endif
             pDrawable->swapBuffersWithDamage(rect_list, n_rects);
+            // ---------- perf collect stop -----------
+#ifdef ENABLE_PERFPERAPI
+            PERF_SCOPE_STOP(843, curTid, perf_starting);
+#endif
         }
         else
         {
+            // ---------- perf collect start ----------
+#ifdef ENABLE_PERFPERAPI
+            pid_t curTid = 0;
+            bool perf_starting = false;
+            PERF_SCOPE_START(795, &curTid, &perf_starting);
+#endif
             pDrawable->swapBuffers();
+            // ---------- perf collect stop -----------
+#ifdef ENABLE_PERFPERAPI
+            PERF_SCOPE_STOP(795, curTid, perf_starting);
+#endif
         }
         if (gRetracer.mState.pDrawableSet.count(pDrawable)==0) gRetracer.OnNewFrame();
     }
@@ -1400,6 +1439,7 @@ const common::EntryMap retracer::egl_callbacks = {
     {"eglCreateWindowSurface", std::make_pair((void*)retrace_eglCreateWindowSurface, false)},
     {"eglCreateWindowSurface2", std::make_pair((void*)retrace_eglCreateWindowSurface2, false)},
     {"eglCreatePlatformWindowSurface", std::make_pair((void*)retrace_eglCreateWindowSurface, false)},
+    {"eglCreatePlatformWindowSurfaceEXT", std::make_pair((void*)retrace_eglCreateWindowSurface, false)},
     {"eglCreatePbufferSurface", std::make_pair((void*)retrace_eglCreatePbufferSurface, false)},
     //{"eglCreatePixmapSurface", std::make_pair((void*)ignore, true)},
     {"eglDestroySurface", std::make_pair((void*)retrace_eglDestroySurface, false)},

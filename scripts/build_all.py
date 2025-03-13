@@ -161,8 +161,21 @@ def check_log_erros(log_file):
                     or re.search(r"\bundefined reference\b", line):
                 print_error(line)
 
-
-def build_project(platform, variant, build_dir, install_dir, project_path, log_file=sys.stdout, make_target='install', cmake_defines=[], stop_early=False, static=False, ffi7=False, ffi8=False):
+def build_project(
+    platform,
+    variant,
+    build_dir,
+    install_dir,
+    project_path,
+    log_file=sys.stdout,
+    make_target='install',
+    cmake_defines=[],
+    stop_early=False,
+    static=False,
+    ffi7=False,
+    ffi8=False,
+    perfperapi=False,
+):
     sanitizer = 'False'
     if variant == 'sanitizer':
         sanitizer = 'address'
@@ -242,6 +255,11 @@ def build_project(platform, variant, build_dir, install_dir, project_path, log_f
 
     if ffi8 and platform in ['wayland_aarch64', 'wayland_arm_hardfloat']:
         cmake_command += ' -DFFI8=TRUE'
+
+    if perfperapi and platform in linux_platforms:
+        cmake_command += ' -DENABLE_PERFPERAPI=TRUE'
+    else:
+        cmake_command += ' -DENABLE_PERFPERAPI=FALSE'
 
     if not os.path.exists(build_dir):
         os.makedirs(build_dir)

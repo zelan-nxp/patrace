@@ -112,8 +112,6 @@ public class SelectActivity extends Activity
     	mTraceOptionNames.put("24bit Depth", "use24BitDepth");
     	mTraceOptionNames.put("AntiAlias (EGL)", "antialiasing");
     	mTraceOptionNames.put("Preload", "preload");
-        mTraceOptionNames.put("Store Program Info", "storeProgramInfo");
-        mTraceOptionNames.put("Remove Unused Attributes", "removeUnusedAttributes");
         mTraceOptionNames.put("Debug", "debug");
         mTraceOptionNames.put("Draw log", "drawlog");
 
@@ -124,8 +122,6 @@ public class SelectActivity extends Activity
     	mTraceOptionValues.put("use24BitDepth", true);
     	mTraceOptionValues.put("antialiasing", false);
     	mTraceOptionValues.put("preload", false);
-        mTraceOptionValues.put("storeProgramInfo", false);
-        mTraceOptionValues.put("removeUnusedAttributes", false);
         mTraceOptionValues.put("debug", false);
         mTraceOptionValues.put("drawlog", false);
     }

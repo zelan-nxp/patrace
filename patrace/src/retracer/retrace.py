@@ -115,6 +115,16 @@ get_query_object_funcs = [
     'glGetQueryObjectivEXT', 'glGetQueryObjectuivEXT'
 ]
 
+# Ignored funcs for per api perf: these are APIs inserted by paretrace.
+per_api_ignored_funcs = [
+    'glCopyClientSideBuffer',
+    'glClientSideBufferData',
+    'glCreateClientSideBuffer',
+    'glGenGraphicBuffer_ARM',
+    'glGraphicBufferData_ARM',
+    'glDeleteGraphicBuffer_ARM',
+]
+
 # Filled out in main()
 reverse_lookup_maps = set(["program", "shader" ,"pipeline", "texture", "buffer"])
 
@@ -127,6 +137,7 @@ maps_with_getters = [
     'sampler',
     'sync',
     'uniformLocation',
+    'uniformBlockIndex',
 ]
 
 
@@ -702,6 +713,9 @@ class Retracer(object):
         if func.name == 'glGetUniformLocation':
             print('    if (old_ret == -1)')
             print('        return;')
+        elif func.name == 'glGetUniformBlockIndex':
+            print('    if (old_ret == GL_INVALID_INDEX)')
+            print('        return;')
         elif func.name in ['glMapBuffer', 'glMapBufferRange', 'glMapBufferOES', 'glMapBufferRangeEXT']:
             print('    (void)old_ret;  // Unused variable')
             print()
@@ -872,68 +886,132 @@ class Retracer(object):
             print('            //if (gRetracer.mOptions.mDebug > 0)')
             print('                DBG_LOG("Enable %s (target 0x%%04x, internalformat 0x%%04x) fixed rate attrib(0x%%04x, 0x%%04x).\\n", target, internalformat, compressInfo.extension, compressInfo.rate);' % (func.name))
             print('            std::vector<int> new_attrib_list = AddtoAttribList(attrib_list, compressInfo.extension, compressInfo.rate, GL_NONE);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             if func.name == 'glTexStorageAttribs2DEXT':
                 print('            glTexStorageAttribs2DEXT(target, levels, internalformat, width, height, new_attrib_list.data());')
             else:
                 print('            glTexStorageAttribs3DEXT(target, levels, internalformat, width, height, depth, new_attrib_list.data());')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('        }')
             print('        else {')
             print('            DBG_LOG("%s(target 0x%%04x, internalformat 0x%%04x): No supported fixed rate.\\n", target, internalformat);' % (func.name))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             if func.name == 'glTexStorageAttribs2DEXT':
                 print('            glTexStorageAttribs2DEXT(target, levels, internalformat, width, height, attrib_list);')
             else:
                 print('            glTexStorageAttribs3DEXT(target, levels, internalformat, width, height, depth, attrib_list);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('        }')
             print('    }')
             print('    else {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             if func.name == 'glTexStorageAttribs2DEXT':
                 print('         glTexStorageAttribs2DEXT(target, levels, internalformat, width, height, attrib_list);')
             else:
                 print('         glTexStorageAttribs3DEXT(target, levels, internalformat, width, height, depth, attrib_list);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
             return
         if func.name in bind_framebuffer_function_names:
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glBindFramebuffer(target, framebufferNew);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glAssertBuffer_ARM':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glAssertBuffer_ARM(target, offset, size, md5);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glAssertFramebuffer_ARM':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glAssertFramebuffer_ARM(target, colorAttachment, md5);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glDeleteBuffers':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glDeleteBuffers(n, buffers);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glDeleteFramebuffers':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glDeleteFramebuffers(n, framebuffers);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glDeleteRenderbuffers':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glDeleteRenderbuffers(n, renderbuffers);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glDeleteTextures':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glDeleteTextures(n, textures);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glDeleteTransformFeedbacks':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glDeleteTransformFeedbacks(n, ids);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glDeleteQueries':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glDeleteQueries(n, ids);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glDeleteSamplers':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glDeleteSamplers(count, samplers);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name in ['glDeleteVertexArrays', 'glDeleteVertexArraysOES']:
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    hardcode_glDeleteVertexArrays(n, arrays);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glCreateClientSideBuffer':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    glCreateClientSideBuffer(name);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             return
         if func.name == 'glMapBufferOES':
             print('    static bool support_checked = false;')
             print('    static bool supported = false;')
             print('    if (!support_checked) { support_checked = true; supported = isGlesExtensionSupported("GL_OES_mapbuffer"); }')
             print('    if (supported) {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('        ret = glMapBufferOES(target, access);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('        if (ret == 0) DBG_LOG("glMapBufferOES(0x%04x, 0x%04x) failed: 0x%04x\\n", (unsigned)target, (unsigned)access, (unsigned)glGetError());')
             print('    }')
             print('    else')
@@ -954,7 +1032,11 @@ class Retracer(object):
             print('        {')
             print('            access_bit = GL_MAP_WRITE_BIT | GL_MAP_READ_BIT;')
             print('        }')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('        ret = glMapBufferRange(target, 0, size, access_bit);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('        if (ret == 0) DBG_LOG("glMapBufferOES -> glMapBufferRange(0x%04x, 0, %d, 0x%04x) failed: 0x%04x\\n", (unsigned)target, size, access_bit, (unsigned)glGetError());')
             print('    }')
             return
@@ -965,17 +1047,25 @@ class Retracer(object):
             print('            GLint const attrib_list[3] = { compressInfo.extension, compressInfo.rate, GL_NONE };')
             print('            //if (gRetracer.mOptions.mDebug > 0)')
             print('                DBG_LOG("Force %s (target 0x%%04x, internalformat 0x%%04x) to fixed rate attrib (0x%%04x, 0x%%04x).\\n", target, internalformat, compressInfo.extension, compressInfo.rate);' % (func.name))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             if func.name == 'glTexStorage2D' or func.name == 'glTexStorage2DEXT':
                 print('            glTexStorageAttribs2DEXT(target, levels, internalformat, width, height, attrib_list);')
             else:
                 print('            glTexStorageAttribs3DEXT(target, levels, internalformat, width, height, depth, attrib_list);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('        }')
             print('        else {')
             print('            DBG_LOG("%s(target 0x%%04x, internalformat 0x%%04x): No supported fixed rate.\\n", target, internalformat);' % (func.name))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             if func.name == 'glTexStorage2D' or func.name == 'glTexStorage2DEXT':
                 print('            %s(target, levels, internalformat, width, height);' % (func.name))
             else:
                 print('            %s(target, levels, internalformat, width, height, depth);' % (func.name))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('        }')
             print('    }')
             print('    else {')
@@ -1016,12 +1106,20 @@ class Retracer(object):
                 print('    const int status = -1;')
             print('    if (gRetracer.mOptions.mShaderCacheFile.size() > 0 && gRetracer.mOptions.mShaderCacheLoad)')
             print('    {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('        load_from_shadercache(programNew, program, status);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
             print('    else')
             print('    {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('        _glLinkProgram(programNew);')
             print('        post_glLinkProgram(programNew, program, (int)status);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
             return
 
@@ -1037,7 +1135,11 @@ class Retracer(object):
         if func.name in shadercache_funcs:
             print('    if (gRetracer.mOptions.mShaderCacheFile.size() == 0 || !gRetracer.mOptions.mShaderCacheLoad)')
             print('    {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('        {name}({args});'.format(name=func.name, args=arg_names))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
             if func.name == 'glAttachShader':
                 print('    gRetracer.getCurrentContext().addShaderID(programNew, shaderNew);')
@@ -1046,22 +1148,40 @@ class Retracer(object):
         elif func.name == 'glTexStorage2DEXT':
             print('    if (gRetracer.mOptions.mLocalApiVersion >= PROFILE_ES3)')
             print('    {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    %s%s%s(%s);' % (indent, indent, 'glTexStorage2D', arg_names))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
             print('    else')
             print('    {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    %s%s%s(%s);' % (indent, indent, func.name, arg_names))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
         elif func.name == 'glTexStorage3DEXT':
             print('    if (gRetracer.mOptions.mLocalApiVersion >= PROFILE_ES3)')
             print('    {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    %s%s%s(%s);' % (indent, indent, 'glTexStorage3D', arg_names))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
             print('    else')
             print('    {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    %s%s%s(%s);' % (indent, indent, func.name, arg_names))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
         elif func.name == 'glClientWaitSync':
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    %sret = %s(%s);' % (indent, func.name, arg_names))
             indent = '    '
             print('    while ((old_ret == GL_ALREADY_SIGNALED || old_ret == GL_CONDITION_SATISFIED) && ret == GL_TIMEOUT_EXPIRED)')
@@ -1069,11 +1189,21 @@ class Retracer(object):
             print('    %sif (old_ret == GL_ALREADY_SIGNALED || old_ret == GL_CONDITION_SATISFIED) timeout = UINT64_MAX;' % indent)
             print('    %sret = %s(%s);' % (indent, func.name, arg_names))
             print('    }')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             indent = ''
         elif func.type is not stdapi.Void:
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    %sret = %s(%s);' % (indent, func.name, arg_names))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
         else:
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('    %s%s(%s);' % (indent, func.name, arg_names))
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
 
         if func.name in ['glViewport', 'glScissor', 'glTexStorage2D', 'glTexStorage2DEXT', 'glTexStorage3D', 'glTexStorage3DEXT']:
             print('    }')
@@ -1086,18 +1216,37 @@ class Retracer(object):
         if func.name == 'glCompileShader':
             print('    if (gRetracer.mOptions.mShaderCacheFile.size() == 0 || !gRetracer.mOptions.mShaderCacheLoad)')
             print('    {')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStart(func)
             print('        post_glCompileShader(shaderNew, shader);')
+            if per_api_ignored_funcs.count(func.name) == 0:
+                self.perfCollectStop(func)
             print('    }')
 
         if func.name == 'glDeleteShader':
             print('    gRetracer.getCurrentContext().deleteShader(shaderNew);')
+
         if func.name == 'glDeleteProgram':
             print('    gRetracer.getCurrentContext().deleteShaderIDs(programNew);')
+
+    def perfCollectStart(self, func):
+        print('    // ---------- perf collect start ----------')
+        print('#ifdef ENABLE_PERFPERAPI')
+        print('     pid_t curTid = 0;')
+        print('     PERF_SCOPE_START(%d, &curTid, &perf_starting);' % func.id)
+        print('#endif')
+
+    def perfCollectStop(self, func):
+        print('    // ---------- perf collect stop -----------')
+        print('#ifdef ENABLE_PERFPERAPI')
+        print('     PERF_SCOPE_STOP(%d, curTid, perf_starting);' % func.id)
+        print('#endif')
 
     def retraceFunctionBody(self, func):
         #print '    DBG_LOG("retrace %s _src = %%p\\n", _src);' % func.name
         print()
         self.deserialize(func)
+        print('    bool perf_starting = false;')
         self.assistantParams(func)
         self.lookupHandles(func)
         self.outAllocate(func)

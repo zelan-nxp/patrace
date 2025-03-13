@@ -14,6 +14,8 @@
 #include "helper/states.h"
 #include "helper/shadermod.hpp"
 
+#include "libcollector/collectors/perf.hpp"
+
 #include "dispatch/eglproc_auto.hpp"
 
 #include "common/image.hpp"
@@ -21,7 +23,9 @@
 #include "common/pa_exception.h"
 #include "common/gl_extension_supported.hpp"
 
-#include "hwcpipe/hwcpipe.h"
+#include "hwcpipe/hwcpipe.hpp"
+#include "hwcpipe/counter_database.hpp"
+#include "device/product_id.hpp"
 
 #include "json/writer.h"
 #include "json/reader.h"
@@ -70,387 +74,265 @@ static inline uint64_t gettime()
     return ((uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec);
 }
 
-/// -- Mali HWCPipe support
-
-struct mali_hwc
+/// -- libGPUCounter support
+struct HWCPipeHandler
 {
-	Json::Value::Int64 cpu_cycles;
-	Json::Value::Int64 cpu_instructions;
-	Json::Value::Int64 gpu_cycles;
-	Json::Value::Int64 fragment_cycles;
-	Json::Value::Int64 vertex_cycles;
-	Json::Value::Int64 read_bw;
-	Json::Value::Int64 write_bw;
-	Json::Value::Int64 vertex_jobs;
-	Json::Value::Int64 fragment_jobs;
-} mali_samples;
-static hwcpipe::HWCPipe *hwcpipe = nullptr;
-static bool is_mali = false;
-static bool mali_perf_started = false;
+    std::vector<hwcpipe::gpu> gpus;
+    std::vector<hwcpipe::sampler_config> sampler_configs;
+    std::vector<std::vector<hwcpipe_counter>> gpu_counters;
+    std::vector<hwcpipe::sampler<>> samplers;
+    std::vector<std::string> output_filenames;
+    std::vector<std::fstream> output_file_handles;
 
-static void mali_perf_init(const char *vendor)
-{
-    mali_samples = {};
-    if (strncasecmp(vendor, "arm", 3) == 0) // was "ARM" but name should now be "Arm"
+    ~HWCPipeHandler()
     {
-        is_mali = true;
-    }
-    hwcpipe::CpuCounterSet cpu{
-        hwcpipe::CpuCounter::Cycles,
-        hwcpipe::CpuCounter::Instructions,
-    };
-    hwcpipe::GpuCounterSet mali_gpu{
-        hwcpipe::GpuCounter::GpuCycles,
-        hwcpipe::GpuCounter::VertexComputeCycles,
-        hwcpipe::GpuCounter::FragmentCycles,
-        hwcpipe::GpuCounter::Pixels,
-        hwcpipe::GpuCounter::ExternalMemoryReadBytes,
-        hwcpipe::GpuCounter::ExternalMemoryWriteBytes,
-        hwcpipe::GpuCounter::VertexComputeJobs,
-        hwcpipe::GpuCounter::FragmentJobs,
-    };
-    if (is_mali)
-    {
-        hwcpipe = new hwcpipe::HWCPipe(cpu, mali_gpu);
-    }
-    else
-    {
-        hwcpipe = new hwcpipe::HWCPipe(cpu, hwcpipe::GpuCounterSet{});
-    }
-}
-
-static void mali_perf_run()
-{
-    hwcpipe->run();
-    mali_perf_started = true;
-}
-
-static void mali_perf_sample()
-{
-    if (!mali_perf_started) return;
-    const hwcpipe::Measurements& m = hwcpipe->sample();
-    if (m.cpu)
-    {
-        for (const auto& pair : *m.cpu)
+        for (auto& fhandle : output_file_handles)
         {
-            const Json::Value::Int64 value = pair.second.get<int64_t>();
-            if (pair.first == hwcpipe::CpuCounter::Cycles) mali_samples.cpu_cycles += value;
-            else if (pair.first == hwcpipe::CpuCounter::Instructions) mali_samples.cpu_instructions += value;
-        }
-    }
-    if (m.gpu)
-    {
-        for (const auto& pair : *m.gpu)
-        {
-            const Json::Value::Int64 value = pair.second.get<int64_t>();
-            switch (pair.first)
+            if (fhandle)
             {
-            case hwcpipe::GpuCounter::GpuCycles: mali_samples.gpu_cycles += value; break;
-            case hwcpipe::GpuCounter::FragmentCycles: mali_samples.fragment_cycles += value; break;
-            case hwcpipe::GpuCounter::VertexComputeCycles : mali_samples.vertex_cycles += value; break;
-            case hwcpipe::GpuCounter::ExternalMemoryReadBytes : mali_samples.read_bw += value; break;
-            case hwcpipe::GpuCounter::ExternalMemoryWriteBytes : mali_samples.write_bw += value; break;
-            case hwcpipe::GpuCounter::VertexComputeJobs : mali_samples.vertex_jobs += value; break;
-            case hwcpipe::GpuCounter::FragmentJobs : mali_samples.fragment_jobs += value; break;
-            default: break; // ignore
+                fhandle.close();
             }
         }
+        for (long unsigned int idx=0; idx<gpus.size(); idx++)
+            gpu_counters[idx].clear();
+        gpus.clear();
+        sampler_configs.clear();
+        gpu_counters.clear();
+        samplers.clear();
+        output_filenames.clear();
+        output_file_handles.clear();
+    }
+    void hwcpipe_init(const std::string &result_path);
+    void write_result_header(const std::string &result_path);
+    void sample_counters();
+    void sample_stop();
+};
+static HWCPipeHandler *mHWCPipeHandler = NULL;
+
+static std::string get_result_path(uint32_t gpu_id, const std::string &result_path)
+{
+    int index = 0;
+
+    std::string output_name = std::string("gpu_id_") + std::to_string(gpu_id) + std::string("_per_frame_counters.csv");
+    std::string output_path = result_path + std::to_string(index) + std::string("_") + output_name;
+
+    std::ifstream tfile(output_path.c_str());
+    while(tfile.good())
+    {
+        tfile.close();
+
+        index += 1;
+        output_path = result_path + std::to_string(index) + std::string("_") + output_name;
+
+        tfile.open(output_path.c_str());
+    }
+
+    DBG_LOG("Writing gpu-counter results to file: %s \n", output_path.c_str());
+
+    return output_path;
+}
+
+static const char *get_product_family_name(hwcpipe::device::gpu_family f)
+{
+    using gpu_family = hwcpipe::device::gpu_family;
+
+    switch (f) {
+    case gpu_family::bifrost:
+        return "Bifrost";
+    case gpu_family::midgard:
+        return "Midgard";
+    case gpu_family::valhall:
+        return "Valhall";
+    case gpu_family::fifthgen:
+        return "Arm 5th Gen";
+    default:
+        return "Unknown";
     }
 }
 
-static void mali_perf_end(Json::Value& v)
+static void print_gpu_meta(const hwcpipe::gpu& gpu)
 {
-    if (mali_perf_started)
-    {
-        hwcpipe->stop();
-    }
-    mali_perf_started = false;
-    delete hwcpipe;
-    hwcpipe = nullptr;
-    if (mali_samples.cpu_cycles) v["cpu_cycles"] = mali_samples.cpu_cycles;
-    if (mali_samples.cpu_instructions) v["cpu_instructions"] = mali_samples.cpu_instructions;
-    if (mali_samples.gpu_cycles) v["gpu_active"] = mali_samples.gpu_cycles;
-    if (mali_samples.fragment_cycles) v["fragment_active"] = mali_samples.fragment_cycles;
-    if (mali_samples.vertex_cycles) v["vertex_active"] = mali_samples.vertex_cycles;
-    if (mali_samples.read_bw) v["read_bytes"] = mali_samples.read_bw;
-    if (mali_samples.write_bw) v["write_bytes"] = mali_samples.write_bw;
-    if (mali_samples.vertex_jobs) v["vertex_jobs"] = mali_samples.vertex_jobs;
-    if (mali_samples.fragment_jobs) v["fragment_jobs"] = mali_samples.fragment_jobs;
+    DBG_LOG("------------------------------------------------------------\n");
+    std::stringstream ss;
+    ss << " GPU Device " << gpu.get_device_number() << "\n";
+    DBG_LOG("%s", ss.str().c_str());
+
+    ss.str("");
+    ss.clear();
+    ss << "    Product Family:  " << get_product_family_name(gpu.get_gpu_family()) << "\n";
+    DBG_LOG("%s", ss.str().c_str());
+
+    ss.str("");
+    ss.clear();
+    ss << "    Number of Cores: " << gpu.num_shader_cores() << "\n";
+    DBG_LOG("%s", ss.str().c_str());
+
+    ss.str("");
+    ss.clear();
+    ss << "    Bus Width:       " << gpu.bus_width() << "\n";
+    DBG_LOG("%s", ss.str().c_str());
 }
 
-/// --- AMD performance counter extension support
-
-#define GL_COUNTER_TYPE_AMD               0x8BC0
-#define GL_COUNTER_RANGE_AMD              0x8BC1
-#define GL_UNSIGNED_INT64_AMD             0x8BC2
-#define GL_PERCENTAGE_AMD                 0x8BC3
-#define GL_PERFMON_RESULT_AVAILABLE_AMD   0x8BC4
-#define GL_PERFMON_RESULT_SIZE_AMD        0x8BC5
-#define GL_PERFMON_RESULT_AMD             0x8BC6
-
-static GLuint pm_monitor = 0;
-static bool amd_perf_activated = false;
-#ifdef ANDROID
-const char *perfmon_filename = "/sdcard/perfmon.csv";
-const char *perfmon_counters = "/sdcard/perfmon_counters.csv";
-const char *perfmon_settings = "/sdcard/perfmon.conf";
-#else
-const char *perfmon_filename = "perfmon.csv";
-const char *perfmon_counters = "perfmon_counters.csv";
-const char *perfmon_settings = "perfmon.conf";
-#endif
-
-static void perfmon_list()
+void HWCPipeHandler::hwcpipe_init(const std::string &result_path)
 {
-    (void)_glGetError(); // reset state
-    GLint numGroups = 0;
-    _glGetPerfMonitorGroupsAMD(&numGroups, 0, NULL);
-    std::vector<GLuint> groups(numGroups);
-    FILE* pm_fp = fopen(perfmon_counters, "w");
-    if (!pm_fp)
-    {
-        DBG_LOG("Could not open file %s for writing perfmon counter list: %s\n", perfmon_counters, strerror(errno));
-        return;
+    // Setup and start HWCP sampling
+    // Detect all GPUs
+    for (const auto &gpu : hwcpipe::find_gpus()) {
+        gpus.push_back(gpu);
     }
-    fprintf(pm_fp, "Group Idx,Group ID,Counter Idx,CounterID,Group Name,Counter Name,Type\n");
-    _glGetPerfMonitorGroupsAMD(NULL, numGroups, groups.data());
-    bool ok = (_glGetError() == GL_NO_ERROR);
-    if (!ok) { DBG_LOG("list: Failed to enumerate counter groups\n"); }
-    for (int i = 0 ; ok && i < numGroups; i++)
+
+	sampler_configs.reserve(sampler_configs.size());
+	gpu_counters.resize(gpus.size());
+	samplers.reserve(gpus.size());
+
+	uint32_t gpu_index = 0;
+	for (auto& gpu : gpus)
+	{
+		print_gpu_meta(gpu);
+		auto counter_db = hwcpipe::counter_database{};
+
+		sampler_configs.push_back(hwcpipe::sampler_config(gpu));
+		auto& config = sampler_configs.back();
+
+		for (hwcpipe_counter counter : counter_db.counters_for_gpu(gpu)) {
+			std::error_code ec = config.add_counter(counter);
+			if (ec) {
+				// Should not happen because counters_for_gpu(gpu) only returns
+				// known counters, by definition
+				assert(false);
+			}
+			gpu_counters[gpu_index].push_back(counter);
+		}
+
+		samplers.push_back(hwcpipe::sampler<>(config));
+		auto& sampler = samplers.back();
+		std::error_code ec = sampler.start_sampling();
+		if (ec) {
+			std::cout << ec.message() << std::endl;
+		}
+		gpu_index += 1;
+	}
+
+	// Write the CSV header here
+	write_result_header(result_path);
+}
+
+void HWCPipeHandler::write_result_header(const std::string &result_path)
+{
+    // This should only be called once
+    assert(output_filenames.size() == 0);
+
+    uint32_t gpu_index = 0;
+    for (auto& gpu_counter_list : gpu_counters)
     {
-        GLint numCounters = 0;
-        GLint maxActiveCounters = 0;
-        char curGroupName[256];
-        memset(curGroupName, 0, sizeof(curGroupName));
-        _glGetPerfMonitorGroupStringAMD(groups[i], 256, NULL, curGroupName);
-        ok = (_glGetError() == GL_NO_ERROR);
-        if (!ok) { DBG_LOG("list: glGetPerfMonitorGroupStringAMD failed\n"); continue; }
-        _glGetPerfMonitorCountersAMD(groups[i], &numCounters, &maxActiveCounters, 0, NULL);
-        ok = (_glGetError() == GL_NO_ERROR);
-        if (!ok) { DBG_LOG("list: glGetPerfMonitorCountersAMD for %s get count failed\n", curGroupName); continue; }
-        std::vector<GLuint> counterList(numCounters);
-        _glGetPerfMonitorCountersAMD(groups[i], NULL, NULL, numCounters, counterList.data());
-        ok = (_glGetError() == GL_NO_ERROR);
-        if (!ok) { DBG_LOG("list: glGetPerfMonitorCountersAMD for %s get data failed\n", curGroupName); continue; }
-        for (int j = 0; j < numCounters; j++)
-        {
-            char curCounterName[256];
-            memset(curCounterName, 0, sizeof(curCounterName));
-            _glGetPerfMonitorCounterStringAMD(groups[i], counterList[j], 256, NULL, curCounterName);
-            ok = (_glGetError() == GL_NO_ERROR);
-            if (!ok) { DBG_LOG("list: glGetPerfMonitorCounterStringAMD failed\n"); break; }
-            GLenum type;
-            _glGetPerfMonitorCounterInfoAMD(groups[i], counterList[j], GL_COUNTER_TYPE_AMD, &type);
-            fprintf(pm_fp, "%d,%u,%d,%u,%s,%s,0x%04x\n", i, groups[i], j, counterList[j], curGroupName, curCounterName, type);
+        std::string result_file_path = get_result_path(gpu_index, result_path);
+        gpu_index += 1;
+
+        output_filenames.push_back(result_file_path);
+
+        hwcpipe::counter_metadata metadata;
+        auto counter_db = hwcpipe::counter_database{};
+
+        output_file_handles.emplace_back();
+        std::fstream& file = output_file_handles.back();
+        file.open(result_file_path.c_str(), std::fstream::out);
+        if (!file) {
+            DBG_LOG("Failed to open file for header output: %s, %s\n", result_file_path.c_str(), strerror(errno));
+            continue;
         }
-    }
-    fclose(pm_fp);
-}
 
-static void amd_perf_init(const char *vendor)
-{
-    unsigned pm_current_group = 0;
-    std::vector<GLuint> perfset;
-    amd_perf_activated = false;
-    if (!isGlesExtensionSupported("GL_AMD_performance_monitor")) return;
-    perfmon_list();
-    FILE* pm_fp = fopen(perfmon_settings, "r");
-    if (pm_fp)
-    {
-        int r = fscanf(pm_fp, "%u\n", &pm_current_group);
-        if (r != 1)
-        {
-            DBG_LOG("Failed to read perfmon.conf! Create this file to enable measurements using GL_AMD_performance_monitor\n");
-            fclose(pm_fp);
-            return;
-        }
-        DBG_LOG("GL_AMD_performance_monitor will attempt to activate for counter group %u\n", pm_current_group);
-        unsigned v = 0;
-        do // read counter values
-        {
-            r = fscanf(pm_fp, "%u\n", &v);
-            if (r == 1)
+        bool is_first_counter = true;
+        for (auto& counter : gpu_counter_list) {
+            std::error_code ec = counter_db.describe_counter(counter, metadata);
+            if (ec) {
+                DBG_LOG("Error when fetching counter metadata: %s\n", ec.message().c_str());
+                assert(false);
+            }
+
+            if (is_first_counter)
             {
-                perfset.push_back(v);
+                file << metadata.name;
+                is_first_counter = false;
+            }
+            else
+            {
+                file << "," << metadata.name;
             }
         }
-        while (r == 1);
-        fclose(pm_fp);
-        pm_fp = NULL;
-    }
-    else // just get top level gpu cycles
-    {
-        DBG_LOG("Failed to open perfmon.conf - using default counter info instead\n");
-        perfset.push_back(2);
-    }
-    (void)_glGetError();
-    GLint numGroups = 0;
-    std::vector<GLuint> groups;
-    _glGetPerfMonitorGroupsAMD(&numGroups, 0, NULL);
-    groups.resize(numGroups);
-    _glGetPerfMonitorGroupsAMD(NULL, numGroups, groups.data());
-    GLint numCounters = 0;
-    GLint maxActiveCounters = 0;
-    _glGetPerfMonitorCountersAMD(groups[pm_current_group], &numCounters, &maxActiveCounters, 0, NULL);
-    bool ok = (_glGetError() == GL_NO_ERROR);
-    if (!ok)
-    {
-        DBG_LOG("glGetPerfMonitorCountersAMD failed to get counter stats\n");
-        return;
-    }
-    if ((unsigned)maxActiveCounters < perfset.size())
-    {
-        DBG_LOG("Too many counters defined (%d max, trying to use %u) - concatenating the list\n", maxActiveCounters, (unsigned)perfset.size());
-        perfset.resize(maxActiveCounters);
-    }
-    std::vector<GLuint> counterList(numCounters);
-    _glGetPerfMonitorCountersAMD(groups[pm_current_group], NULL, NULL, numCounters, counterList.data());
-    ok = (_glGetError() == GL_NO_ERROR);
-    if (!ok)
-    {
-        DBG_LOG("glGetPerfMonitorCountersAMD failed to get counter list\n");
-        _glDeletePerfMonitorsAMD(1, &pm_monitor);
-        return;
-    }
-    _glGenPerfMonitorsAMD(1, &pm_monitor);
-    std::vector<GLuint> active_counters(perfset.size());
-    for (unsigned i = 0; i < perfset.size(); i++)
-    {
-         active_counters[i] = counterList[perfset[i]];
-    }
-    _glSelectPerfMonitorCountersAMD(pm_monitor, GL_TRUE, groups[pm_current_group], perfset.size(), active_counters.data());
-    ok = (_glGetError() == GL_NO_ERROR);
-    DBG_LOG("Enabling perf monitor with %d counters for group %u: %s\n", (int)perfset.size(), groups[pm_current_group], ok ? "OK" : "FAILED");
-    if (!ok)
-    {
-        DBG_LOG("Failed to enable perf monitor!\n");
-        _glDeletePerfMonitorsAMD(1, &pm_monitor);
-        return;
-    }
-    // Write out csv header if file does not exist already
-    pm_fp = fopen(perfmon_filename, "w");
-    if (!pm_fp)
-    {
-        DBG_LOG("Could not open file %s for writing perfmon header: %s\n", perfmon_filename, strerror(errno));
-        _glDeletePerfMonitorsAMD(1, &pm_monitor);
-        return;
-    }
-    char groupname[256];
-    char name[256];
-    fprintf(pm_fp, "Name");
-    _glGetPerfMonitorGroupStringAMD(groups[pm_current_group], 256, NULL, groupname);
-    for (unsigned j = 0; j < perfset.size(); j++)
-    {
-        _glGetPerfMonitorCounterStringAMD(groups[pm_current_group], active_counters[j], 256, NULL, name);
-        fprintf(pm_fp, ",%s:%s", groupname, name);
-    }
-    fprintf(pm_fp, "\n");
-    fclose(pm_fp);
-    amd_perf_activated = true;
-}
 
-static void amd_perf_run()
-{
-    if (!amd_perf_activated)
-    {
-        return;
-    }
-    _glBeginPerfMonitorAMD(pm_monitor);
-    bool ok = (_glGetError() == GL_NO_ERROR);
-    if (!ok)
-    {
-        DBG_LOG("perfmon : FAILED at begin\n");
-        _glDeletePerfMonitorsAMD(1, &pm_monitor);
-        amd_perf_activated = false;
-        return;
+        file << "\n";
     }
 }
 
-static void amd_perf_end(Json::Value& v)
+void HWCPipeHandler::sample_counters()
 {
-    if (!amd_perf_activated)
+    for (auto& sampler : samplers)
     {
-        return;
-    }
-    _glEndPerfMonitorAMD(pm_monitor);
-    bool ok = (_glGetError() == GL_NO_ERROR);
-    if (!ok)
-    {
-        DBG_LOG("perfmon end : FAILED\n");
-    }
-    FILE* pm_fp = fopen(perfmon_filename, "a");
-    if (!pm_fp)
-    {
-        DBG_LOG("Could not open file %s for writing perfmon data: %s\n", perfmon_filename, strerror(errno));
-    }
-    GLuint dataAvail = GL_FALSE;
-    int repeat = 0;
-    do
-    {
-        _glGetPerfMonitorCounterDataAMD(pm_monitor, GL_PERFMON_RESULT_AVAILABLE_AMD, sizeof(GLuint), &dataAvail, NULL);
-        if (dataAvail == GL_FALSE)
-        {
-            _glFinish();
-            usleep(1000);
+        std::error_code ec = sampler.sample_now();
+        if (ec) {
+            DBG_LOG("Error when sampling counter: %s\n", ec.message().c_str());
+            continue;
         }
-        repeat++;
     }
-    while (dataAvail == GL_FALSE && repeat < 20);
-    if (!dataAvail) DBG_LOG("Failed to find any perfmon data!\n");
-    GLsizei written = 0;
-    GLuint resultSize = 0;
-    _glGetPerfMonitorCounterDataAMD(pm_monitor, GL_PERFMON_RESULT_SIZE_AMD, sizeof(GLuint), &resultSize, NULL);
-    ok = (_glGetError() == GL_NO_ERROR);
-    if (!ok) DBG_LOG("perfmon end : Could not fetch data size\n");
-    std::vector<GLuint> result(resultSize / sizeof(GLuint));
-    _glGetPerfMonitorCounterDataAMD(pm_monitor, GL_PERFMON_RESULT_AMD, resultSize, (GLuint*)result.data(), &written);
-    ok = (_glGetError() == GL_NO_ERROR);
-    if (!ok) DBG_LOG("perfmon end : Could not fetch data itself\n");
-    if (pm_fp) fprintf(pm_fp, "run");
-    GLsizei wordCount = 0;
-    while (wordCount * (GLsizei)sizeof(GLuint) < written)
+
+    // Read all counters and store
+    uint32_t sampler_index = 0;
+    for (auto& gpu_counter_list : gpu_counters)
     {
-        GLuint groupId = result[wordCount];
-        GLuint counterId = result[wordCount + 1];
-        uint64_t counterResult = 0;
-        memcpy(&counterResult, &result[wordCount + 2], sizeof(uint64_t));
-        if (pm_fp) fprintf(pm_fp, ",%llu", (unsigned long long)counterResult);
-        if (groupId == 0 && counterId == 2) v["gpu_active"] = (Json::Value::Int64)counterResult;
-        wordCount += 4;
+        std::fstream& file = output_file_handles[sampler_index];
+
+        hwcpipe::counter_sample sample;
+        bool first_value = true;
+        for (hwcpipe_counter counter : gpu_counter_list) {
+            std::error_code ec = samplers[sampler_index].get_counter_value(counter, sample);
+            if (ec) {
+                DBG_LOG("ERROR: Failed to sample counter!");
+                assert(false);
+            }
+
+            std::string delimiter = ",";
+            if (first_value)
+            {
+                delimiter = "";
+                first_value = false;
+            }
+
+            switch (sample.type) {
+                case hwcpipe::counter_sample::type::uint64:{
+                    file << delimiter << sample.value.uint64;
+                    break;
+                }
+                case hwcpipe::counter_sample::type::float64:{
+                    file << delimiter << sample.value.float64;
+                    break;
+                }
+                default:{
+                    break;
+                }
+            }
+        }
+
+        file << "\n";
+
+        sampler_index += 1;
     }
-    if (pm_fp) fprintf(pm_fp, "\n");
-    if (pm_fp) fclose(pm_fp);
-    _glDeletePerfMonitorsAMD(1, &pm_monitor);
-    amd_perf_activated = false;
-    DBG_LOG("Perfmon data successfully written (%d words, %u result size)\n", (int)wordCount, (unsigned)resultSize);
 }
 
-/// --- Performance monitoring
-
-static void perfmon_init()
+void HWCPipeHandler::sample_stop()
 {
-    const char *vendor = (const char *)_glGetString(GL_VENDOR);
-    mali_perf_init(vendor);
-    amd_perf_init(vendor);
-
-    mali_perf_run();
-    amd_perf_run();
-}
-
-static void perfmon_frame()
-{
-    mali_perf_sample();
-}
-
-static void perfmon_end(Json::Value& v)
-{
-    mali_perf_end(v);
-    amd_perf_end(v);
+    for (auto& sampler : samplers)
+    {
+        std::error_code ec = sampler.stop_sampling();
+        if (ec) DBG_LOG("Error when stopping sample: %s.\n", ec.message().c_str());
+    }
 }
 
 Retracer::~Retracer()
 {
     delete mCollectors;
+    delete mHWCPipeHandler;
+    mCollectors = nullptr;
+    mHWCPipeHandler = nullptr;
 
 #ifndef NDEBUG
     if (mVBODataSize) DBG_LOG("VBO data size : %u\n", mVBODataSize);
@@ -475,7 +357,6 @@ bool Retracer::OpenTraceFile(const char* filename)
     mStateLogger.open(std::string(filename) + ".retracelog");
     loadRetraceOptionsFromHeader();
     mFinish.store(false);
-    initializeCallCounter();
 
     return true;
 }
@@ -494,6 +375,7 @@ void Retracer::CloseTraceFile()
     mCSBuffers.clear();
     mSnapshotPaths.clear();
     results.clear();
+    mCallStats.clear();
     mVBODataSize = 0;
     mTextureDataSize = 0;
     mCompressedTextureDataSize = 0;
@@ -1232,12 +1114,6 @@ static void set_cpu_mask(const std::string& descr)
     }
 }
 
-void Retracer::perfMonInit()
-{
-    perfmon_init();
-    delayedPerfmonInit = false;
-}
-
 // Only one thread runs at a time, so no need for mutexing etc. except for when we go to sleep.
 void Retracer::RetraceThread(const int threadidx, const int our_tid)
 {
@@ -1312,10 +1188,6 @@ void Retracer::RetraceThread(const int threadidx, const int our_tid)
             if (mOptions.mDebug && hasCurrentContext())
             {
                 CheckGlError();
-            }
-            if (isSwapBuffers && (mCurCall.tid == mOptions.mRetraceTid || mOptions.mMultiThread))
-            {
-                if (mOptions.mPerfmon) perfmon_frame();
             }
             r.swaps += (int)isSwapBuffers;
         }
@@ -1435,6 +1307,16 @@ skip_call:
             } while (!success);
         }
     }
+
+    /* unbind the context and surface from current thread, thus eglTerminiate could clear up properly */
+    if (gRetracer.mState.mThreadArr[our_tid].getDrawable() &&
+        gRetracer.mState.mThreadArr[our_tid].getContext()) {
+        _glFlush();
+    }
+    GLWS::instance().MakeCurrent(0, 0);
+    gRetracer.mState.mThreadArr[our_tid].setDrawable(0);
+    gRetracer.mState.mThreadArr[our_tid].setContext(0);
+
     results[threadidx] = r;
 }
 
@@ -1557,11 +1439,29 @@ void Retracer::StartMeasuring()
 {
     if (mOptions.mCollectorEnabled)
     {
+#ifdef ENABLE_PERFPERAPI
+        if (mOptions.mPerfPerApi)
+        {
+            DBG_LOG("Per GLES API perf counter instrumentation enabled. Retracing may took longer time.\n");
+            mCollectors = new Collection(mOptions.mCollectorValue, true);
+        }
+        else
+        {
+            DBG_LOG("libcollector enabled.\n");
+            mCollectors = new Collection(mOptions.mCollectorValue, false);
+        }
+#else
         DBG_LOG("libcollector enabled.\n");
+        mCollectors = new Collection(mOptions.mCollectorValue, false);
+#endif
         mOptions.mCollectorEnabled = false;
-        mCollectors = new Collection(mOptions.mCollectorValue);
         mCollectors->initialize();
         mCollectors->start();
+    }
+    if (mOptions.mPerfmon)
+    {
+        mHWCPipeHandler = new HWCPipeHandler;
+        mHWCPipeHandler->hwcpipe_init(mOptions.mPerfmonOut);
     }
     mRollbackCallNo = mFile.curCallNo;
     DBG_LOG("================== Start timer (Frame: %u) ==================\n", mCurFrameNo);
@@ -1628,7 +1528,6 @@ void Retracer::OnNewFrame()
                 sync(); // force all pending output to disk before this point
             }
             StartMeasuring();
-            if (mOptions.mPerfmon) perfmon_init();
         }
         // Per frame measurement
         if (mCurFrameNo > mOptions.mBeginMeasureFrame && mCurFrameNo <= mOptions.mEndMeasureFrame)
@@ -1636,7 +1535,12 @@ void Retracer::OnNewFrame()
             if (mOptions.mInstrumentationDelay > 0) {
                 usleep(mOptions.mInstrumentationDelay);
             }
+#ifdef ENABLE_PERFPERAPI
+            if (mCollectors && !mOptions.mPerfPerApi) mCollectors->collect();
+#else
             if (mCollectors) mCollectors->collect();
+            if (mOptions.mPerfmon) mHWCPipeHandler->sample_counters();
+#endif
         }
         if (mOptions.mFixedFps != 0) //Limited fps replay mode
         {
@@ -1805,6 +1709,16 @@ void Retracer::DiscardFramebuffers()
     }
 }
 
+#ifdef ENABLE_PERFPERAPI
+void Retracer::CollectPerapiStart(uint16_t func_id, int tid) {
+    mCollectors->collect_scope_start(func_id, COLLECT_REPLAY_THREADS, tid);
+}
+
+void Retracer::CollectPerapiStop(uint16_t func_id, int tid) {
+    mCollectors->collect_scope_stop(func_id, COLLECT_REPLAY_THREADS, tid);
+}
+#endif
+
 void Retracer::reportAndAbort(const char *format, ...)
 {
     char buf[256];
@@ -1871,8 +1785,11 @@ void Retracer::saveResult(Json::Value& result)
     result["start_time_boot"] = ((double)mTimerBeginTimeBoot) / os::timeFrequency;
     result["end_time_boot"] = ((double)endTimeBoot) / os::timeFrequency;
     result["patrace_version"] = PATRACE_VERSION;
-    if (mOptions.mPerfmon) perfmon_end(result);
 
+    if (mOptions.mPerfmon)
+    {
+        mHWCPipeHandler->sample_stop();
+    }
     if (mCollectors)
     {
         mCollectors->stop();
@@ -1929,8 +1846,7 @@ void Retracer::saveResult(Json::Value& result)
         {
             DBG_LOG("Failed to open output callstats in %s: %s\n", filename, strerror(errno));
         }
-        mCallStats.clear();
-    }
+     }
 
     DBG_LOG("Saving results...\n");
     if (!TraceExecutor::writeData(result, numOfFrames, duration))
@@ -1980,11 +1896,6 @@ void Retracer::saveResult(Json::Value& result)
         }
     }
 #endif
-}
-
-void Retracer::initializeCallCounter()
-{
-    mCallCounter["glLinkProgram"] = 0;
 }
 
 void pre_glDraw()
@@ -2074,6 +1985,62 @@ void DeleteShaderCacheFile()
 {
     const std::string bpath = gRetracer.mOptions.mShaderCacheFile + ".bin";
     remove(bpath.c_str());
+}
+
+void SaveCacheToFile(std::map<std::vector<uint8_t>, std::vector<uint8_t>>& gApplicationCache)
+{
+    const std::string bpath = gRetracer.mOptions.mBlobShaderCacheFile + ".bin";
+    std::ofstream file(bpath.c_str(), std::ios::binary);
+    if (file.is_open())
+    {
+        for (const auto& entry : gApplicationCache)
+        {
+            EGLsizeiANDROID keySize = entry.first.size();
+            EGLsizeiANDROID valueSize = entry.second.size();
+            file.write(reinterpret_cast<const char*>(&keySize), sizeof(keySize));
+            file.write(reinterpret_cast<const char*>(entry.first.data()), keySize);
+            file.write(reinterpret_cast<const char*>(&valueSize), sizeof(valueSize));
+            file.write(reinterpret_cast<const char*>(entry.second.data()), valueSize);
+        }
+        file.close();
+        DBG_LOG("Successfully save shader cache file: %s\n", bpath.c_str());
+    }
+    else
+    {
+        DBG_LOG("Failed to save shader cache file: %s\n", bpath.c_str());
+    }
+}
+
+void LoadCacheFromFile(std::map<std::vector<uint8_t>, std::vector<uint8_t>>& gApplicationCache)
+{
+    const std::string bpath = gRetracer.mOptions.mBlobShaderCacheFile + ".bin";
+    std::ifstream file(bpath.c_str(), std::ios::binary);
+    if (file.is_open())
+    {
+        while (file)
+        {
+            EGLsizeiANDROID keySize;
+            file.read(reinterpret_cast<char*>(&keySize), sizeof(keySize));
+            if (file.eof()) break;
+
+            std::vector<uint8_t> keyVec(keySize);
+            file.read(reinterpret_cast<char*>(keyVec.data()), keySize);
+
+            EGLsizeiANDROID valueSize;
+            file.read(reinterpret_cast<char*>(&valueSize), sizeof(valueSize));
+
+            std::vector<uint8_t> valueVec(valueSize);
+            file.read(reinterpret_cast<char*>(valueVec.data()), valueSize);
+
+            gApplicationCache[keyVec] = valueVec;
+        }
+        file.close();
+        DBG_LOG("Successfully load shader cache file: %s\n", bpath.c_str());
+    }
+    else
+    {
+        DBG_LOG("Failed to load shader cache file: %s\n", bpath.c_str());
+    }
 }
 
 void OpenShaderCacheFile()
@@ -2303,29 +2270,6 @@ void post_glLinkProgram(GLuint program, GLuint originalProgramName, int status)
     {
         save_shadercache(program, originalProgramName, bSkipShadercache);
     }
-
-    if (!(gRetracer.mOptions.mStoreProgramInformation || gRetracer.mOptions.mRemoveUnusedVertexAttributes))
-    {
-        return;
-    }
-
-    Context& context = gRetracer.getCurrentContext();
-    retracer::hmap<unsigned int>& shaderRevMap = context.getShaderRevMap();
-
-    Json::Value& result = TraceExecutor::addProgramInfo(program, originalProgramName, shaderRevMap);
-
-    if (gRetracer.mOptions.mRemoveUnusedVertexAttributes)
-    {
-        ShaderMod shaderMod(gRetracer, program, result, shaderRevMap);
-        shaderMod.removeUnusedAttributes();
-
-        if (shaderMod.getError())
-        {
-            gRetracer.reportAndAbort("Failed to modify shader: %s", shaderMod.getErrorString().c_str());
-        }
-    }
-
-    ++gRetracer.mCallCounter["glLinkProgram"];
 }
 
 

@@ -3,6 +3,7 @@
 
 #include "json/value.h"
 #include "helper/states.h"
+#include "retracer.hpp"
 
 #include <stdint.h>
 #include <iostream>
@@ -61,12 +62,12 @@ class TraceExecutor{
         static void clearError();
         static bool isSetup();
 
-        static void addDisabledButActiveAttribute(int program, const std::string& attributeName);
-        static Json::Value& addProgramInfo(int program, int originalProgramName, retracer::hmap<unsigned int>& shaderRevMap);
-
         static const char* ErrorNames[];
 
     private:
+#ifdef ENABLE_PERFPERAPI
+        static bool savePerfPerApiData(Json::Value &result_data_value);
+#endif
         static std::string mResultFile;
         static std::vector<std::string> mErrorList;
         struct ResultFile
@@ -81,12 +82,6 @@ class TraceExecutor{
             std::string mPath;
             bool mShouldDelete;
         };
-        // Map that describes vertex attributes that are active but not enabled
-        // The key is the program id, and the value is a list of attributes for
-        // that program that are problematic.
-        static ProgramAttributeListMap_t mProgramAttributeListMap;
-
-        static ProgramInfoList_t mProgramInfoList;
 
         static void overrideDefaultsWithJson(Json::Value &value);
 };

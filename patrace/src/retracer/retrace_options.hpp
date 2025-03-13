@@ -41,6 +41,10 @@ struct RetraceOptions
     bool                mDoOverrideResolution = false;
     bool                mPreload = false;
     bool                mStepMode = false;
+    // Only for ANGLE save blob cache use
+    bool                mSaveBlobCache = false;
+    // Only for ANGLE load blob cache use
+    bool                mLoadBlobCache = false;
     unsigned int        mBeginMeasureFrame = 1;
     unsigned int        mEndMeasureFrame = INT32_MAX;
     int                 mLoopTimes = 0;
@@ -73,8 +77,6 @@ struct RetraceOptions
 
     bool                mStrictEGLMode = false;
     bool                mStrictColorMode = false;
-    bool                mStoreProgramInformation = false;
-    bool                mRemoveUnusedVertexAttributes = false;
     unsigned int        mOnscrSampleW = 48;
     unsigned int        mOnscrSampleH = 27;
     unsigned int        mOnscrSampleNumX = 10;
@@ -102,6 +104,7 @@ struct RetraceOptions
     bool                mFinishBeforeSwap = false;
     bool                mIntervalSwap = false;
     bool                mPerfmon = false;
+    std::string         mPerfmonOut = "";
     int                 mOverrideMSAA = -1;
 
     std::vector<unsigned int> mLinkErrorWhiteListCallNum;
@@ -123,11 +126,16 @@ struct RetraceOptions
 
     std::string         mShaderCacheFile;
     bool                mShaderCacheLoad = true;
+    std::string         mBlobShaderCacheFile;
     bool                mCacheOnly = false;
 
     bool                mCollectorEnabled = false;
     Json::Value         mCollectorValue;
 
+#ifdef ENABLE_PERFPERAPI
+    bool                mPerfPerApi = false;
+    std::string         mPerfPerApiOutDir = "./perfperapi";
+#endif
     std::string         mScriptPath;
     common::CallSet*    mScriptCallSet = nullptr;
     std::string         mPatchPath;

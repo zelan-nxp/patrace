@@ -590,7 +590,7 @@ There are three different ways to tell the retracer which parameters that should
 |----------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `-tid THREADID`                              | only the function calls invoked by the given thread ID will be retraced                                                                                                                                                                |
 | `-s CALL_SET`                                | take snapshot on the specific call set. CALL_SET is defined at the end of table. Example: `*/frame` to take snapshot for each frame, `250/frame` for frame 250, `1-3/frame` for frame from 1 to 3. For multiple distinct ranges, callset could use the comma delimiter: `1-3/frame,250/frame`. |
-| `-step`                                      | For desktop Linux, use F1-F4 to step forward frame by frame, F5-F8 to step forward draw call by draw call. For Linux fbdev, press H to see detailed usage.                                                                             |
+| `-step`                                      | For desktop Linux, use F1-F4 to step forward frame by frame, F5-F8 to step forward draw call by draw call, F10 to play remaining frames. For Linux fbdev, press H to see detailed usage.                                                                             |
 | `-ores W H`                                  | override the resolution of the final onscreen rendering (FBOs used in earlier renderpasses are not affected!) |
 | `-msaa SAMPLES`                              | Enable multi sample anti alias for the final framebuffer |
 | `-overrideMSAA SAMPLES`                      | Override any existing MSAA settings for intermediate framebuffers that already use MSAA. |
@@ -619,6 +619,8 @@ There are three different ways to tell the retracer which parameters that should
 | `-libGLESv2`                                 | Set the path to the GLES 2+ library to load |
 | `-version`                                   | Output the version of this program                                                                                                                                                                                                     |
 | `-callstats`                                 | (since r2p4) Output GLES API call statistics to disk, time spent in API calls measured in nanoseconds. Required to use with -framerange.                                                                                                                                |
+| `-perfperapi`                                | (since r5p4) Enable perf GLES API entrypoint perf instrumentation. Requires collector to be enabled. Requires running the build script with `--perfperapi True` parameters.         |
+| `-perfperapiOutDir`                          | (since r5p4) Set output directory for per API perf instrumentation, defaults to ./perfperapi. Requires running the build script with `--perfperapi True` parameters.                       |
 | `-collect`                                   | (since r2p4) Collect performance information and save it to disk. It enables some default libcollector collectors. For fine-grained control over libcollector behaviour, use the JSON interface instead.                               |
 | `-perfrange FRAME_START FRAME_END`           | (since r2p5) Create perf callstacks of the selected frame range and save it to disk. It calls "perf record -g" in a separate thread once your selected frame range begins.                                                             |
 | `-perfpath filepath`                         | (since r2p5) Path to your perf binary. Mostly useful on embedded systems.                                                                                                                                                              |
@@ -694,8 +696,6 @@ There are three different ways to tell the retracer which parameters that should
 | `--ei msaa`                | SAMPLES. Enable multi sample anti alias for the final framebuffer                                                                                                                                                                                                                                                                                                            |
 | `--ei overrideMSAA`        | SAMPLES. Override any existing MSAA settings for intermediate framebuffers that already use MSAA.                                                                                                                                                                                                                                                                            |
 | `--ei forceVRS`            | VRS. Force the use of VRS for all framebuffers. Valid values: 38566 (1x1), 38567 (1x2), 38568 (2x1), 38569 (2x2), 38572 (4x2) and 38574 (4x4).                                                                                                                                                                                                                               |
-| `--ez removeUnusedAttributes`| true/false(default) Modify the shader in runtime by removing attributes that were not enabled during tracing. When this is enabled, 'storeProgramInformation' is automatically turned on.                                                                                                                                                                                  |
-| `--ez storeProgramInfo`    | true/false(default) In the result file, store information about a program after each glLinkProgram. Such as, active attributes and compile errors.                                                                                                                                                                                                                           |
 | `--es cpumask`             | Lock all work associated with this replay to the specified CPU cores, given as a string of one or zero for each core.                                                                                                                                                                                                                                                        |
 | `--es jsonData`            | path to a JSON file containing parameters, e.g. /data/apitrace/input.json. Only works together with traceFilePath and resultFile, any other options don't work anymore                                                                                                                                                                                                       |
 | `--es traceFilePath`       | base path to trace file storage, e.g. /data/apitrace                                                                                                                                                                                                                                                                                                                         |
@@ -734,6 +734,8 @@ A JSON file can be passed to the retracer via the -jsonParameters option. In thi
 | singlesurface                | int        | yes      | (since r3p0) Render all surfaces except the given one to pbuffer render target. |
 | instrumentation              | list       | yes      | **(deprecated since r2p4)** See PATrace performance measurements setup for more information                                                                                                                                            |
 | callStats                    | boolean    | yes      | Output GLES API call statistics to callstats.csv under /sdcard for Android, or under the current dir, time spent in API calls measured in nanoseconds.                                                                                 |
+| perfperapi | boolean | yes | (since r5p4) Enable perf instrumentation per GLES API entrypoint. Requires collector to be enabled. Requires running the build script with `--perfperapi True` parameters. |
+| perfperapiOutDir | string | yes | (since r5p4) Set output directory for perf per API instrumentation, defaults to ./perfperapi. Requires running the build script with `--perfperapi True` parameters. |
 | collectors                   | dictionary | yes      | (since r2p4) Dictionary of libcollector collectors to enable, and their configuration options. <br> Example:                              <br>                                                                            {                                                                                                                                                                                                                                                                                              "cpufreq": { "required": true },<br>                                                                                                                                                                                                 "rusage": {}<br>                                                                                                                                                                                                                                                                               } <br>                                                                                                                                                                                                                                 For description of the various collectors, see the libcollector documentation below.                                                                                                               |
 | perfrange                    | string     | yes      | The frame range delimited with '-'. The first frame must be 1 or higher. |
 | perfpath                     | string     | yes      | Path to your perf binary. Mostly useful on embedded systems.   |
@@ -755,11 +757,9 @@ A JSON file can be passed to the retracer via the -jsonParameters option. In thi
 | snapshotCallset              | string     | yes      | call begin - call end / frequency, example: `1/frame` or `10-100/frame` or `1/frame,10-100/frame` or `10-100` (snapshot after every call in range!). The snapshot is saved under the current directory by default.                                              |
 | snapshotPrefix               | string     | yes      | Contain a path and a prefix, resulting screenshots will be named prefix-callnumber.png                                                                                                                                                |
 | skipfence                    | string     | yes      | Skip some fence waits calls(eglClientWaitSync, eglWaitSync, eglClientWaitSyncKHR, eglWaitSyncKHR, glWaitSync, glClientWaitSync) when within the measurement frame range.                                                                                            |
-| removeUnusedVertexAttributes | boolean    | yes      | Modify the shader in runtime by removing attributes that were not enabled during tracing. When this is enabled, 'storeProgramInformation' is automatically turned on.                                                                  |
 | flushWork                    | boolean    | yes      | Will try hard to flush all pending CPU and GPU work before starting running the selected framerange. This should usually not be necessary.                                                                                             |
 | finishBeforeSwap             | boolean    | yes      | Will try hard to flush all pending CPU and GPU work before every call to swap the backbuffer. This should usually not be necessary.                                                                                                    |
 | debug                        | boolean    | yes      | Output debug messages                                                                                                                                                                                                                  |
-| storeProgramInformation      | boolean    | yes      | In the result file, store information about a program after each glLinkProgram. Such as, active attributes and compile errors.                                                                                                         |
 | threadId                     | int        | yes      | Retrace this specified thread id. **DO NOT USE** except for debugging!                                                                                                                                                                 |
 | offscreenSingleTile          | boolean    | yes      | Draw only one frame for each buffer swap in offscreen mode.                                                                                                                                                                            |
 | multithread                  | boolean    | yes      | Enable to run the calls in all the threads recorded in the pat file. The calls will still be serialized to avoid multithreading issues and enforce deterministic replay. |
@@ -794,9 +794,7 @@ This is an example of a JSON parameter file:
      "overrideResolution": true,
      "overrideWidth": 1280,
      "preload": true,
-     "removeUnusedVertexAttributes": true,
-     "stencilBits": 0,
-     "storeProgramInformation": true
+     "stencilBits": 0
     }
 
 For using it with the Linux retracer, use the following command line:
@@ -1027,7 +1025,7 @@ Existing collectors:
 
 | Name                 | What it does                                                                                                                                                                            | Unit             | Options                             
 |----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|-------------------------------------|
-| `perf`               | Gets CPU Counter from perf                                                                                                                                                              | Cycles           | "set", "event", "allthread". See detailed information in perf collector options. |
+| `perf`               | Gets CPU Counter from perf                                                                                                                                                              | Cycles           | "set", "event", "allthread". Can be used in conjunction with the `perfperapi` option to enable per GLES API perf instrumentation. See detailed information in perf collector options.|
 | `battery_temperature`| Gets the battery temperature                                                                                                                                                            | Celsius          |                                     |                                                                                          |
 | `cpufreq`            | CPU frequencies. Each sample is the average frequency used since the last sampling point for each core. Then you also get the max of every core in `highest_avg` for your convenience. | Hz               |                                     
 | `memfreq`            | Memory frequency                                                                                                                                                                        |  Hz              |                                     |                                                                                          |
@@ -1083,6 +1081,7 @@ Perf collector can also be configured with the following json options.
 |------------------------------|------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | set                          | int        | no       | CPU counters set for a group of events. set 0~3 is reserved for specified event counters. 0:default for generalized hardware CPU events  1:CPU cache related  2:CPU bandwidth related  3:CPU bandwidth related on Cortex-A73. 4 and greater:customized CPU counter set.It should be used with "event" option to specify event counters.                                                                                                                                                                                                                             |
 | event                        | jsonarray  | yes      | a group of event. Only works with set 4 or greater. set 0~3 will overwrite it with reserved event counter. If "set" is 0~3, just skip this option.                                                                                                                               |
+| inherit                      | int        | yes      | 1(default)/0. If set to 1, the thread perf result will include its child thread if the child thread is created after the collector start measuring.                                                                                                                               |
 | allthread                    | boolean    | yes      | true(default)/false. If true, the count includes events that happens in replay main threads as well as mali- background threads. If false, the count only includes events in replay main threads. Recommend setting it to true strongly to get data of main thread and background thread at the same time.                                                                                                                                                                                                                                                          |
 
 
@@ -1256,6 +1255,44 @@ PerfCollector samples counter per frame for each thread. To reduce the size of o
         ]
     }
 
+
+Per GLES API Perf Collection 
+------------------------------
+
+If you need to collect perf data per GLES API, you can build the retracer with `--perfperapi True` parameters in the build script and set `perfperapi` and `perfperapiOutDir` in the input.json file. For instance:
+
+```json
+{
+    "collectors": {
+        "perf": {
+            "set":4,
+            "inherit": 0,
+            "event": [{
+                    "name": "CPUCycleCount",
+                    "device": "armv8_pmuv3",
+                    "config": 17,
+                    "counterLen64bit": 1
+                }
+            ]
+        }
+    },
+    "perfperapi": true,
+    "perfperapiOutDir": "./pergles/perfperapi-manhattan",
+    "file": "/mnt/pat/manhattan30_60fps.orig.pat",
+    "preload": true,
+    "frames": "2-611",
+}
+```
+
+With `perfperapi` enabled, paretrace will record perf counters for each GLES API entrypoints and outputs the results in the specified `perfperapiOutDir` diectory. We output per api perf data in the `perapidata.csv`, where each row corresponds to an entrypoint, each column denotes a specific perf event:
+
+```csv
+Entrypoint,Num Calls,CPUCycleCount_PerCall
+glActiveTexture,542104,102.96995,
+glBeginQuery,2243,4919.95007,
+glBeginTransformFeedback,3654,7332.83032,
+glBindBuffer,404252,426.18108,
+...
 
 Generating CPU load statistics with ferret
 ------------------------------

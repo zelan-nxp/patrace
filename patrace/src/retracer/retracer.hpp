@@ -26,6 +26,10 @@
 #include <unordered_map>
 #include <map>
 #include <mutex>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sys/ioctl.h>
 
 #ifdef __APPLE__
 #include "TargetConditionals.h"
@@ -48,6 +52,13 @@ struct thread_result // internal counters
     int swaps = 0;
 };
 
+struct CallStat
+{
+    uint64_t count = 0;
+    uint64_t time = 0;
+};
+
+typedef std::unordered_map<std::string, CallStat> CallStats_t;
 class Retracer
 {
 public:
@@ -111,9 +122,13 @@ public:
     unsigned mVBODataSize = 0;
     unsigned mTextureDataSize = 0;
     unsigned mCompressedTextureDataSize = 0;
-    std::unordered_map<std::string, int> mCallCounter;
 
     Collection *mCollectors = nullptr;
+
+#ifdef ENABLE_PERFPERAPI
+    void CollectPerapiStart(uint16_t func_id, int tid);
+    void CollectPerapiStop(uint16_t func_id, int tid);
+#endif
 
     bool mMosaicNeedToBeFlushed = false;
     bool delayedPerfmonInit = false;
@@ -142,6 +157,8 @@ public:
 
     std::set<unsigned int> mBufferMapCheckpoint; // set of buffer names
     common::ClientSideBufferObjectSet mCSBCheckpoint; // Copy of mCSBuffers
+
+    CallStats_t mCallStats;
 
 private:
     bool loadRetraceOptionsByThreadId(int tid);
@@ -179,13 +196,6 @@ private:
     common::HeaderVersion mFileFormatVersion = common::INVALID_VERSION;
     std::vector<std::string> mSnapshotPaths;
 
-    struct CallStat
-    {
-        uint64_t count = 0;
-        uint64_t time = 0;
-    };
-    std::unordered_map<std::string, CallStat> mCallStats;
-
     pid_t child = 0;
 
     int mLoopTimes = 0;
@@ -213,12 +223,60 @@ inline float Retracer::ticksToSeconds(long long t) const
 
 extern Retracer gRetracer;
 
+#ifdef ENABLE_PERFPERAPI
+inline __attribute__((always_inline)) void PERF_SCOPE_START(int funcId, int *curTid, bool *perf_starting)
+{
+    if (gRetracer.mOptions.mPerfPerApi && gRetracer.GetCurFrameId() >= gRetracer.mOptions.mBeginMeasureFrame && gRetracer.GetCurFrameId() < gRetracer.mOptions.mEndMeasureFrame)
+    {
+        volatile uint64_t PMCR_EL0_safe = 0;
+        *curTid = syscall(__NR_gettid);
+        *perf_starting = true;
+#if defined(__aarch64__)
+        asm volatile("mrs %0, PMCR_EL0" : "=r" (PMCR_EL0_safe));
+        asm volatile("msr PMCR_EL0, %0" : : "r" ((PMCR_EL0_safe & 0xFFFFFFFFFFFFFFFE)));
+#elif defined(__arm__)
+        asm volatile("mrc p15, 0, %0, c9, c12, 0" : "=r"(PMCR_EL0_safe));
+        asm volatile("mcr p15, 0, %0, c9, c12, 0" : : "r"(PMCR_EL0_safe & 0xFFFFFFFE));
+#endif
+        gRetracer.CollectPerapiStart(funcId, *curTid);
+#if defined(__aarch64__)
+        asm volatile("msr PMCR_EL0, %0" : : "r" (PMCR_EL0_safe));
+#elif defined(__arm__)
+        asm volatile("mcr p15, 0, %0, c9, c12, 0" : : "r"(PMCR_EL0_safe));
+#endif
+    }
+}
+
+inline __attribute__((always_inline)) void PERF_SCOPE_STOP(int funcId, int curTid, bool perf_starting)
+{
+    if (perf_starting)
+    {
+        volatile uint64_t PMCR_EL0_safe = 0;
+#if defined(__aarch64__)
+        asm volatile("mrs %0, PMCR_EL0" : "=r" (PMCR_EL0_safe));
+        asm volatile("msr PMCR_EL0, %0" : : "r" ((PMCR_EL0_safe & 0xFFFFFFFFFFFFFFFE)));
+#elif defined(__arm__)
+		asm volatile("mrc p15, 0, %0, c9, c12, 0" : "=r"(PMCR_EL0_safe));
+		asm volatile("mcr p15, 0, %0, c9, c12, 0" : : "r"(PMCR_EL0_safe & 0xFFFFFFFE));
+#endif
+        gRetracer.CollectPerapiStop(funcId, curTid);
+#if defined(__aarch64__)
+        asm volatile("msr PMCR_EL0, %0" : : "r" (PMCR_EL0_safe));
+#elif defined(__arm__)
+        asm volatile("mcr p15, 0, %0, c9, c12, 0" : : "r"(PMCR_EL0_safe));
+#endif
+    }
+}
+#endif
+
 void pre_glDraw();
 void post_glLinkProgram(GLuint shader, GLuint originalShaderName, int status);
 void post_glCompileShader(GLuint program, GLuint originalProgramName);
 void post_glShaderSource(GLuint shader, GLuint originalshaderName, GLsizei count, const GLchar **string, const GLint *length);
 void OpenShaderCacheFile();
 void DeleteShaderCacheFile();
+void SaveCacheToFile(std::map<std::vector<uint8_t>, std::vector<uint8_t>>& gApplicationCache);
+void LoadCacheFromFile(std::map<std::vector<uint8_t>, std::vector<uint8_t>>& gApplicationCache);
 bool load_from_shadercache(GLuint program, GLuint originalProgramName, int status);
 void hardcode_glBindFramebuffer(int target, unsigned int framebuffer);
 void hardcode_glDeleteBuffers(int n, unsigned int* oldBuffers);

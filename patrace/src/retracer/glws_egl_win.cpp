@@ -222,6 +222,12 @@ public:
                 gRetracer.drawBudget += 1000;
                 return;
             }
+            else if (GetAsyncKeyState(VK_F10))
+            {
+                gRetracer.frameBudget = INT64_MAX;
+                gRetracer.drawBudget = INT64_MAX;
+                return;
+            }
         }
     }
 };

@@ -3328,11 +3328,20 @@ bool checkUnusedTexture(unsigned int mfflag)
             char* src = gRetracer.src;
             GLuint program;
             src = common::ReadFixed<GLuint>(src, program);
-            if(program == 0) return false;
-            if (strstr(funcName, "glUniform"))
+
+            if (strstr(funcName, "glUniform") && strstr(funcName, "glUniformBlockBinding")==NULL)
             {
                 GLint p;
                 _glGetIntegerv(GL_CURRENT_PROGRAM, &p);
+                if (p == 0)
+                {
+                    GLint pipeline = 0;
+                    _glGetIntegerv(GL_PROGRAM_PIPELINE_BINDING, &pipeline);
+                    if (pipeline != 0)
+                    {
+                        _glGetProgramPipelineiv(pipeline, GL_ACTIVE_PROGRAM, &p);
+                    }
+                }
                 Context& context = gRetracer.getCurrentContext();
                 unsigned int tracePId = context.getProgramRevMap().RValue((unsigned int)p);
                 program = (GLuint)tracePId;
@@ -3344,6 +3353,7 @@ bool checkUnusedTexture(unsigned int mfflag)
                 src = common::ReadStringArray(src, strings);
                 src = common::ReadFixed<GLuint>(src, program);
             }
+            if(program == 0) return false;
 
             unsigned int globalProgramId = contexts[current_context[cur_thread]].gProgramIdTracer.remap().at(program);
             if (strcmp(funcName, "glDeleteProgram") == 0)
@@ -3362,6 +3372,7 @@ bool checkUnusedTexture(unsigned int mfflag)
     return false;
 }
 
+/* check whether the buffer could be restored at the end of targetFrame. */
 bool checkBufferSubData()
 {
     char* src = gRetracer.src;
@@ -3391,6 +3402,7 @@ bool checkBufferSubData()
     return true;
 }
 
+/* check whether the texture could be restored at the end of Frame0  */
 bool checkTexSubImage()
 {
     bool ret = false;
@@ -3619,7 +3631,7 @@ static void replay_thread(common::OutFile &out, const int threadidx, const int o
         const bool isDrawCall = (common::FREQUENCY_RENDER == common::GetCallFlags(funcName));
 
         const bool shouldSaveData = isFrameTarget ? (retracer.GetCurFrameId() == ffOptions.mTargetFrame - 1) && isSwapBuffers : curDrawCallNo == ffOptions.mTargetDrawCallNo;
-        if (retracer.mCurCall.tid == retracer.mOptions.mRetraceTid && shouldSaveData)
+        if ((retracer.mOptions.mMultiThread || retracer.mCurCall.tid == retracer.mOptions.mRetraceTid) && shouldSaveData)
         {
             DBG_LOG("Started saving GL state\n");
             GLint dpy = 0;
@@ -4070,6 +4082,22 @@ static bool ParseCommandLine(int argc, char** argv, FastForwardOptions& ffOption
     return success;
 }
 
+static std::string getOptBitString(unsigned int optBits)
+{
+    std::string bitString;
+    if (optBits & FASTFORWARD_REMOVE_UNUSED_TEXTURE) bitString += std::string("REMOVE_UNUSED_TEXTURE  ");
+    if (optBits & FASTFORWARD_REMOVE_UNUSED_BUFFER) bitString += std::string("REMOVE_UNUSED_BUFFER  ");
+    if (optBits & FASTFORWARD_REMOVE_UNUSED_SHADER) bitString += std::string("REMOVE_UNUSED_SHADER  ");
+    if (optBits & FASTFORWARD_REMOVE_UNUSED_MIPMAP) bitString += std::string("REMOVE_UNUSED_MIPMAP  ");
+    if (optBits & FASTFORWARD_NO_RESTORE_UNUSED_TEXTURE) bitString += std::string("NO_RESTORE_UNUSED_TEXTURE  ");
+    if (optBits & FASTFORWARD_NO_RESTORE_UNUSED_BUFFER) bitString += std::string("NO_RESTORE_UNUSED_BUFFER  ");
+    if (optBits & FASTFORWARD_REMOVE_TEXTURE_SUBIMAGE) bitString += std::string("REMOVE_TEXTURE_SUBIMAGE  ");
+    if (optBits & FASTFORWARD_REMOVE_COPY_IMG_SUBDATA) bitString += std::string("REMOVE_COPY_IMG_SUBDATA  ");
+    if (optBits & FASTFORWARD_REMOVE_BUF_SUBDATA) bitString += std::string("REMOVE_BUF_SUBDATA  ");
+    if (optBits & FASTFORWARD_REMOVE_BUF_MAP) bitString += std::string("REMOVE_BUF_MAP  ");
+    return bitString;
+}
+
 extern "C"
 int main(int argc, char** argv)
 {
@@ -4092,10 +4120,12 @@ int main(int argc, char** argv)
     // Register Entries before opening tracefile as sigbook is read there
     common::gApiInfo.RegisterEntries(gles_callbacks);
     common::gApiInfo.RegisterEntries(egl_callbacks);
+    std::string optBits;
 
     if ( (ffOptions.mFlags >> OPTIMIZE_BIT) != 0 )
     {
-        DBG_LOG("Enabled optimization options: 0x%x .\n", ffOptions.mFlags);
+        optBits = getOptBitString(ffOptions.mFlags);
+        DBG_LOG("Enabled optimization options: %s\n", optBits.c_str());
         // Initialize texture usage parser
         ParseInterfaceRetracing parser;
         if (!parser.open(gRetracer.mOptions.mFileName))
@@ -4157,6 +4187,8 @@ int main(int argc, char** argv)
         ffRestoreInfoJson["buffers"]  = true;
         ffRestoreInfoJson["fbo0Repeat"] = ffOptions.mFbo0Repeat;
         ffJson["restoreOptions"] = ffRestoreInfoJson;
+        if ( (ffOptions.mFlags >> OPTIMIZE_BIT) != 0 )
+            ffJson["optimizationBits"] = optBits;
 
         // Version of fastforwarder and retracer
         Json::Value ffVersions(Json::objectValue);

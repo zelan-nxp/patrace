@@ -364,6 +364,12 @@ public class GLThread extends Thread {
                     js.put("perfout", parentIntent.getStringExtra("perfout"));
                 }
 
+                if(parentIntent.hasExtra("perfmon")){
+                    js.put("perfmon", parentIntent.getBooleanExtra("perfmon", false));
+                }
+                if(parentIntent.hasExtra("perfmonout")){
+                    js.put("perfmonout", parentIntent.getStringExtra("perfmonout"));
+                }
                 if(parentIntent.hasExtra("scriptpath")){
                     js.put("scriptpath", parentIntent.getStringExtra("scriptpath"));
                     js.put("scriptcallset", parentIntent.getStringExtra("scriptcallset"));
@@ -412,12 +418,6 @@ public class GLThread extends Thread {
                 if (parentIntent.hasExtra("use24BitDepth")) {
                     js.put("depthBits", 24);
                 }
-
-                js.put("removeUnusedVertexAttributes",
-                       parentIntent.getBooleanExtra("removeUnusedAttributes", false));
-
-                js.put("storeProgramInformation",
-                       parentIntent.getBooleanExtra("storeProgramInfo", false));
 
                 if (parentIntent.getBooleanExtra("debug", false))
                 {

@@ -75,7 +75,7 @@ static void usage()
     printf("    N: render one frame.\n");
     printf("    M: render 10 frames.\n");
     printf("    L: render 100 frames.\n");
-    printf("    Q: exit.\n");
+    printf("    Q: continue to play all remaining frames.\n");
     printf("    H: show this usage.\n");
 }
 
@@ -130,7 +130,8 @@ void GlwsEglFbdev::processStepEvent()
     }
     else if (cmd == 'Q')
     {
-        gRetracer.mFinish = true;
+        gRetracer.frameBudget = INT64_MAX;
+        gRetracer.drawBudget = INT64_MAX;
     }
     else if (cmd == 'H')
     {

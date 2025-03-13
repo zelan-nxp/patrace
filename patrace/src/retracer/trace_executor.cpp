@@ -31,8 +31,6 @@
 
 std::string TraceExecutor::mResultFile;
 std::vector<std::string> TraceExecutor::mErrorList;
-ProgramAttributeListMap_t TraceExecutor::mProgramAttributeListMap;
-ProgramInfoList_t TraceExecutor::mProgramInfoList;
 
 using namespace retracer;
 
@@ -230,8 +228,6 @@ void TraceExecutor::overrideDefaultsWithJson(Json::Value &value)
     {
         DBG_LOG("Debug mode enabled.\n");
     }
-    options.mStoreProgramInformation = value.get("storeProgramInformation", false).asBool();
-    options.mRemoveUnusedVertexAttributes = value.get("removeUnusedVertexAttributes", false).asBool();
 
     if (value.get("offscreenBigTiles", false).asBool())
     {
@@ -284,10 +280,29 @@ void TraceExecutor::overrideDefaultsWithJson(Json::Value &value)
         options.mPerfmon = true;
     }
 
+#ifdef ANDROID
+    options.mPerfmonOut = value.get("perfmonout", "/sdcard/").asString();
+#else
+    options.mPerfmonOut = value.get("perfmonout", "./").asString();
+#endif
+
     if (value.get("step", false).asBool())
     {
         options.mStepMode = true;
     }
+
+#ifdef ENABLE_PERFPERAPI
+    if (value.get("perfperapi", false).asBool())
+    {
+        if (!options.mCollectorEnabled)
+        {
+            gRetracer.reportAndAbort("perfperapi requires collectors to be enabled.");
+        }
+        options.mPerfPerApi = true;
+    }
+
+    options.mPerfPerApiOutDir = value.get("perfperapiOutDir", "./perfperapi").asString();
+#endif
 
     options.eglAfrcRate = value.get("eglSurfaceCompressionFixedRate", -1).asInt();
     if (options.eglAfrcRate != -1 && (options.eglAfrcRate < compression_fixed_rate_disabled || options.eglAfrcRate >= compression_fixed_rate_flag_end))
@@ -323,6 +338,20 @@ void TraceExecutor::overrideDefaultsWithJson(Json::Value &value)
     options.mCacheOnly = value.get("cacheOnly", options.mCacheOnly).asBool();
     if (value.isMember("loadShaderCache") && value.isMember("saveShaderCache")) gRetracer.reportAndAbort("loadShaderCache and saveShaderCache cannot be used at the same time in the JSON input!");
     if (!value.isMember("saveShaderCache") && value.isMember("cacheOnly")) gRetracer.reportAndAbort("cacheOnly requires saveShaderCache to also be present in the JSON input!");
+
+    if (value.isMember("saveBlobCache"))
+    {
+        options.mBlobShaderCacheFile = value.get("saveBlobCache", "").asString();
+        options.mSaveBlobCache = true;
+        options.mLoadBlobCache = false;
+    }
+    else if (value.isMember("loadBlobCache"))
+    {
+        options.mBlobShaderCacheFile = value.get("loadBlobCache", "").asString();
+        options.mSaveBlobCache = false;
+        options.mLoadBlobCache = true;
+    }
+    if (value.isMember("loadBlobCache") && value.isMember("saveBlobCache")) gRetracer.reportAndAbort("loadBlobCache and saveBlobCache cannot be used at the same time in the JSON input!");
 
     options.mInstrumentationDelay = value.get("instrumentationDelay", 0).asUInt();
 
@@ -457,64 +486,6 @@ void TraceExecutor::initFromJson(const std::string& json_data, const std::string
 #endif
 }
 
-void TraceExecutor::addDisabledButActiveAttribute(int program, const std::string& attributeName)
-{
-    ProgramAttributeListMap_t::iterator programIt = mProgramAttributeListMap.find(program);
-    if (programIt == mProgramAttributeListMap.end())
-    {
-        mProgramAttributeListMap[program] = AttributeList_t();
-    }
-
-    mProgramAttributeListMap[program].insert(attributeName);
-}
-
-Json::Value& TraceExecutor::addProgramInfo(int program, int originalProgramName, retracer::hmap<unsigned int>& shaderRevMap)
-{
-    ProgramInfo pi(program);
-    Json::Value json;
-    Json::Value attributeNames(Json::arrayValue);
-
-    for (int i = 0; i < pi.activeAttributes; ++i)
-    {
-        VertexArrayInfo vai = pi.getActiveAttribute(i);
-        attributeNames[i] = vai.name;
-    }
-
-    json["callNo"] = gRetracer.GetCurCallId();
-    json["activeAttributeNames"] = attributeNames;
-    json["activeAttributeCount"] = pi.activeAttributes;
-    json["id"] = originalProgramName;
-    json["linkStatus"] = pi.linkStatus;
-    if (pi.linkStatus == GL_FALSE)
-    {
-        json["linkLog"] = pi.getInfoLog();
-
-        if (gRetracer.mOptions.mFailOnShaderError)
-        {
-            gRetracer.reportAndAbort("A shader program failed to link");
-        }
-    }
-
-    json["shaders"] = Json::Value(Json::objectValue);
-    for (std::vector<unsigned int>::iterator it = pi.shaderNames.begin(); it != pi.shaderNames.end(); ++it)
-    {
-        ShaderInfo shader(*it);
-        unsigned int originalShaderName = shaderRevMap.RValue(shader.id);
-        std::stringstream ss;
-        ss << originalShaderName;
-        std::string id = ss.str();
-
-        json["shaders"][id] = Json::Value(Json::objectValue);
-        json["shaders"][id]["compileStatus"] = shader.compileStatus;
-        if (shader.compileStatus == GL_FALSE)
-        {
-            json["shaders"][id]["compileLog"] = shader.getInfoLog();
-        }
-    }
-    mProgramInfoList.push_back(json);
-    return mProgramInfoList.back();
-}
-
 void TraceExecutor::writeError(const std::string &error_description)
 {
 #ifdef ANDROID
@@ -536,8 +507,6 @@ void TraceExecutor::writeError(const std::string &error_description)
 
 void TraceExecutor::clearResult()
 {
-    mProgramAttributeListMap.clear();
-    mProgramInfoList.clear();
     clearError();
 }
 
@@ -545,6 +514,128 @@ void TraceExecutor::clearError()
 {
     mErrorList.clear();
 }
+
+#ifdef ENABLE_PERFPERAPI
+bool TraceExecutor::savePerfPerApiData(Json::Value &collector_res)
+{
+    try
+    {
+        DBG_LOG("Processing perapi data...\n");
+
+        // perapi_data[thread_name][api entrypoint][perf event] = total num of counters
+        std::map<std::string, std::map<std::string, std::map<std::string, int64_t>>> perapi_data;
+
+        // num_calls_data[thread_name][api entrypoint] =
+        //   num of calls (caller), num of calls with perf data (caller + other threads)
+        std::map<std::string, std::map<std::string, std::pair<int64_t, int64_t>>> num_calls_data;
+
+        // Background counter data. (total_counters, num_frames)
+        std::map<std::string, std::pair<int64_t, int64_t>> bg_counter_data;
+
+        std::set<std::string> all_events;
+        for (Json::Value &thread_data : collector_res["perf"]["thread_data"]) {
+            std::string thread_name = thread_data["CCthread"].asString();
+            auto event_names = thread_data.getMemberNames();
+            for (std::string &event_name : event_names) {
+                if (!event_name.compare("CCthread:ScopeNumCalls")) {
+                    for (unsigned int func_id = 0; func_id < thread_data[event_name].size();
+                         func_id++) {
+                        int64_t num_calls = thread_data[event_name][func_id].asInt64();
+                        if (num_calls == 0)
+                            continue;
+                        const char *func_name = func_id == 0 ? "noop" : common::gApiInfo.IdToNameArr[func_id];
+                        if (!func_name) {
+                            DBG_LOG("Unknown API id %d\n", func_id);
+                            continue;
+                        }
+                        num_calls_data[thread_name][func_name].first = num_calls;
+                    }
+                    thread_data.removeMember(event_name);
+                }
+                if (!event_name.compare("CCthread:ScopeNumWithPerf")) {
+                    for (uint32_t func_id = 0; func_id < thread_data[event_name].size();
+                         func_id++) {
+                        int64_t num_calls = thread_data[event_name][func_id].asInt64();
+                        if (num_calls == 0)
+                            continue;
+                        const char *func_name = func_id == 0 ? "noop" : common::gApiInfo.IdToNameArr[func_id];
+                        if (!func_name) {
+                            DBG_LOG("Unknown API id %d\n", func_id);
+                            continue;
+                        }
+                        num_calls_data[thread_name][func_name].second = num_calls;
+                    }
+                    thread_data.removeMember(event_name);
+                }
+
+                // Parse counter data for each API
+                if (event_name.find(":ScopeSum") != std::string::npos) {
+                    std::string event = event_name.substr(0, event_name.find(":"));
+                    all_events.insert(event);
+                    for (uint32_t func_id = 0; func_id < thread_data[event_name].size();
+                         func_id++) {
+                        int64_t event_value = thread_data[event_name][func_id].asInt64();
+                        if (event_value == 0)
+                            continue;
+                        const char *func_name = func_id == 0 ? "noop" : common::gApiInfo.IdToNameArr[func_id];
+                        if (!func_name) {
+                            DBG_LOG("Unknown API id %d\n", func_id);
+                            continue;
+                        }
+                        perapi_data[thread_name][func_name][event] = event_value;
+                    }
+                    thread_data.removeMember(event_name);
+                }
+            }
+        }
+
+        const char *basedir = gRetracer.mOptions.mPerfPerApiOutDir.c_str();
+        mkdir(basedir, 0777);
+        // Output main thread perapi data
+        auto mainThreadData = perapi_data.find("replayMainThreads");
+        if (mainThreadData == perapi_data.end()) {
+            DBG_LOG("No main thread data found in perapi data.\n");
+            return false;
+        }
+        std::string file_name = std::string(basedir) + "/perfperapi.csv";
+        FILE *fp = fopen(file_name.c_str(), "w");
+        if (!fp) {
+            DBG_LOG("Failed to open output CSV %s: %s\n", file_name.c_str(), strerror(errno));
+            return false;
+        }
+        fprintf(fp, "Entrypoint,Num Calls,");
+        for (const auto &event_item : all_events) {
+            fprintf(fp, "%s_PerCall,", event_item.c_str());
+        }
+        fprintf(fp, "\n");
+        for (const auto &api : mainThreadData->second) {
+            std::string func_name = api.first;
+            int64_t num_calls = num_calls_data["replayMainThreads"][func_name].first;
+            fprintf(fp, "%s,%lld,", func_name.c_str(), (long long int)num_calls);
+            for (const auto &event : all_events) {
+                auto it = api.second.find(event);
+                int64_t event_value = it != api.second.end() ? it->second : 0;
+                if (it != api.second.end()) {
+                    double per_call =
+                        num_calls ? (static_cast<double>(event_value) / num_calls) : 0;
+                    fprintf(fp, "%.8lf,", per_call);
+                } else {
+                    fprintf(fp, "0,");
+                }
+            }
+            fprintf(fp, "\n");
+        }
+        fclose(fp);
+
+        DBG_LOG("Per API perf data written to directory %s.\n", basedir);
+    }
+    catch (...) {
+        DBG_LOG("ERROR: Exception raised during saving per API data. Potentially broken JSON value returned by collector module.\n");
+        return false;
+    }
+    return true;
+}
+#endif
 
 bool TraceExecutor::writeData(Json::Value result_data_value, int frames, float duration)
 {
@@ -566,8 +657,16 @@ bool TraceExecutor::writeData(Json::Value result_data_value, int frames, float d
         Json::Value result_list_value;
         if (gRetracer.mCollectors)
         {
-            result_data_value["frame_data"] = gRetracer.mCollectors->results();
+            auto collector_res = gRetracer.mCollectors->results();
+
+#ifdef ENABLE_PERFPERAPI
+            if (gRetracer.mOptions.mPerfPerApi) {
+                TraceExecutor::savePerfPerApiData(collector_res);
+            }
+#endif
+
             try {
+                result_data_value["frame_data"] = collector_res;
                 if (result_data_value["frame_data"].isMember("ferret")) {
                     if ( result_data_value["frame_data"]["ferret"].empty() ) {
                         DBG_LOG("Ferret data detected, but the results are empty.\n");
@@ -617,35 +716,6 @@ bool TraceExecutor::writeData(Json::Value result_data_value, int frames, float d
             } catch (...) {
                 DBG_LOG("ERROR: Exception raised during CPU FPS calculations. Potentially broken JSON value returned by collector module.\n");
             }
-        }
-
-        if (!mProgramAttributeListMap.empty())
-        {
-            Json::Value programs;
-            for (ProgramAttributeListMap_t::iterator it = mProgramAttributeListMap.begin(); it != mProgramAttributeListMap.end(); ++it)
-            {
-                std::stringstream programIdSS;
-                programIdSS << it->first;
-                int attrIndex = 0;
-                for (AttributeList_t::iterator lit = it->second.begin(); lit != it->second.end(); ++lit)
-                {
-                    programs[programIdSS.str()][attrIndex] = *lit;
-                    ++attrIndex;
-                }
-            }
-            result_data_value["programs_with_unused_active_attributes"] = programs;
-        }
-
-        if (!mProgramInfoList.empty())
-        {
-            Json::Value programs;
-            int i = 0;
-            for (ProgramInfoList_t::iterator it = mProgramInfoList.begin(); it != mProgramInfoList.end(); ++it, ++i)
-            {
-                Json::Value programInfoJson = *it;
-                programs[i] = programInfoJson;
-            }
-            result_data_value["programInfos"] = programs;
         }
 
         // Get chosen EGL configuration information

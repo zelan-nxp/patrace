@@ -96,3 +96,7 @@ patrace/python/patracetools/patracetools.egg-info
 
 # Vim swap files
 *.swp
+
+# IDE
+.vscode
+.idea

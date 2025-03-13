@@ -416,7 +416,7 @@ class Tracer:
 
         self.invokeFunction(func)
 
-        if func.name == 'eglCreateWindowSurface':
+        if func.name in ['eglCreateWindowSurface', 'eglCreatePlatformWindowSurfaceEXT', 'eglCreatePlatformWindowSurface']:
             print('    EGLint x = 0, y = 0, width = 0, height = 0;')
             print('    if (_eglQuerySurface(dpy, _result, EGL_WIDTH, (EGLint*) &width) == EGL_FALSE)')
             print('        DBG_LOG("Failed to query surface width\\n");')
@@ -866,7 +866,7 @@ class Tracer:
             print('    gTraceOut->mpBinAndMeta->writeHeader(true);')
         if func.name == 'eglMakeCurrent':
             print('    after_eglMakeCurrent(dpy, draw, ctx);')
-        if func.name == 'eglCreateWindowSurface':
+        if func.name in ['eglCreateWindowSurface', 'eglCreatePlatformWindowSurfaceEXT','eglCreatePlatformWindowSurface']:
             print('    after_eglCreateWindowSurface(dpy, config, _result, x, y, width, height);')
         if func.name == 'eglCreatePbufferSurface':
             print('    after_eglCreatePbufferSurface(dpy, config, _result);')

@@ -7,6 +7,12 @@ include_directories(
     ${THIRDPARTY}/libcollector
 )
 
+option(ENABLE_PERFPERAPI "Enable per GLES API perf instrumentation feature." OFF)
+
+if(ENABLE_PERFPERAPI)
+    add_definitions(-DENABLE_PERFPERAPI)
+endif()
+
 if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
     add_definitions(-DRETRACE -DGLES_CALLCONVENTION=_stdcall)
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")

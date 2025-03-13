@@ -171,6 +171,12 @@ void GlwsEglWayland::processStepEvent()
                 gRetracer.drawBudget += drawNum;
                 return;
             }
+            else if (key == KEY_F10)
+            {
+                gRetracer.drawBudget = INT64_MAX;
+                gRetracer.frameBudget = INT64_MAX;
+                return;
+            }
         }
 
         int events = wl_display_dispatch_queue((struct wl_display *)mEglNativeDisplay, mKBQueue);
